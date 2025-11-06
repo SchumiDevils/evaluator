@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from .base import Base, TimestampMixin
+
+
+class Response(TimestampMixin, Base):
+    __tablename__ = "responses"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    answer_text: Mapped[str] = mapped_column(Text, nullable=False)
+    evaluation_id: Mapped[int | None] = mapped_column(ForeignKey("evaluations.id", ondelete="SET NULL"))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    token_usage: Mapped[int | None] = mapped_column(Integer)
+    mode: Mapped[str] = mapped_column(String(32), default="rule_based")
+
+    evaluation: Mapped["Evaluation | None"] = relationship(back_populates="responses")
+    author: Mapped["User | None"] = relationship(back_populates="responses")
+    feedback_items: Mapped[list["Feedback"]] = relationship(
+        back_populates="response", cascade="all, delete-orphan"
+    )
+
+
+from .evaluation import Evaluation  # noqa: E402
+from .feedback import Feedback  # noqa: E402
+from .user import User  # noqa: E402
+
+
