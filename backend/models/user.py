@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+from typing import List, Optional
 
 from sqlalchemy import Enum, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -19,12 +20,12 @@ class User(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
-    full_name: Mapped[str | None] = mapped_column(String(255))
+    full_name: Mapped[Optional[str]] = mapped_column(String(255))
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.STUDENT, nullable=False)
 
-    evaluations: Mapped[list["Evaluation"]] = relationship(back_populates="author", cascade="all, delete")
-    responses: Mapped[list["Response"]] = relationship(back_populates="author", cascade="all, delete")
+    evaluations: Mapped[List["Evaluation"]] = relationship(back_populates="author", cascade="all, delete")
+    responses: Mapped[List["Response"]] = relationship(back_populates="author", cascade="all, delete")
 
 
 from .evaluation import Evaluation  # noqa: E402  (circular)

@@ -15,8 +15,8 @@ async def generate_and_store_feedback(
     *,
     answer: str,
     mode: str = "rule_based",
-    evaluation_id: int | None = None,
-    user: User | None = None,
+    evaluation_id: Optional[int] = None,
+    user: Optional[User] = None,
     rubric: Optional[Iterable[str]] = None,
 ) -> FeedbackResponse:
     response = Response(

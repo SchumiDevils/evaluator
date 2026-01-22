@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from typing import List, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -16,17 +18,17 @@ class FeedbackItemSchema(BaseModel):
 
 class ResponseCreate(BaseModel):
     answer: str
-    evaluation_id: int | None = None
+    evaluation_id: Optional[int] = None
     mode: str = Field(default="rule_based", pattern="^(rule_based|ai)$")
-    rubric: list[str] | None = None
+    rubric: Optional[List[str]] = None
 
 
 class ResponseRead(BaseModel):
     id: int
     answer: str
-    evaluation_id: int | None
+    evaluation_id: Optional[int]
     created_at: datetime
-    feedback: list[FeedbackItemSchema]
+    feedback: List[FeedbackItemSchema]
 
     class Config:
         from_attributes = True
@@ -34,6 +36,6 @@ class ResponseRead(BaseModel):
 
 class FeedbackResponse(BaseModel):
     response_id: int
-    feedback: list[FeedbackItemSchema]
+    feedback: List[FeedbackItemSchema]
 
 

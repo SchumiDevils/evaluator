@@ -15,7 +15,7 @@ settings = get_settings()
 @dataclass
 class AIResult:
     feedback: list[FeedbackItemSchema]
-    token_usage: int | None = None
+    token_usage: Optional[int] = None
 
 
 def _parse_text_to_feedback(text: str, source: str) -> list[FeedbackItemSchema]:

@@ -28,16 +28,26 @@ modele NLP (OpenAI sau Hugging Face).
 
 ### 1. Backend FastAPI
 
-```bash
-cd backend
-python -m venv .venv
-.venv\Scripts\activate  # pe Windows
-pip install -r requirements.txt
-# setează variabile (opțional, pentru producție AI / Postgres)
-# setx DATABASE_URL "postgresql+asyncpg://user:pass@localhost:5432/evaluator"
-# setx OPENAI_API_KEY "sk-..."
-uvicorn backend.app:app --reload
-```
+- **Windows (un singur pas):**
+
+  ```powershell
+  scripts\start_backend.bat
+  ```
+
+  Scriptul creează automat mediul virtual `.venv`, instalează dependențele (doar când `requirements.txt` s-a schimbat) și pornește `uvicorn`.
+
+- **Manual / alte platforme:**
+
+  ```bash
+  cd backend
+  python -m venv .venv
+  source .venv/bin/activate            # Linux/Mac
+  # .venv\Scripts\activate             # Windows
+  pip install -r requirements.txt
+  uvicorn backend.app:app --reload
+  ```
+
+  Configurează variabilele de mediu după nevoie (Postgres, OpenAI/HF etc.). După prima instalare poți porni direct `uvicorn backend.app:app --reload` dacă vrei să eviți scriptul.
 
 Rutele principale (prefiks `/api/v1`):
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from typing import Optional
+
 from pydantic import BaseModel, EmailStr, Field
 
 from ..models.user import UserRole
@@ -9,7 +11,7 @@ from ..models.user import UserRole
 
 class UserBase(BaseModel):
     email: EmailStr
-    full_name: str | None = None
+    full_name: Optional[str] = None
     role: UserRole = Field(default=UserRole.STUDENT)
 
 
