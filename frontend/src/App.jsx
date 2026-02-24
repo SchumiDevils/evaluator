@@ -55,6 +55,26 @@ const Icons = {
     <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
       <path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/>
     </svg>
+  ),
+  Back: () => (
+    <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+      <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/>
+    </svg>
+  ),
+  Edit: () => (
+    <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+      <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+    </svg>
+  ),
+  Delete: () => (
+    <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+      <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+    </svg>
+  ),
+  Send: () => (
+    <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+      <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+    </svg>
   )
 }
 
@@ -69,6 +89,8 @@ function App() {
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
 
   // Auth state
   const [authMode, setAuthMode] = useState('login')
@@ -76,14 +98,22 @@ function App() {
   const [authError, setAuthError] = useState('')
   const [isAuthLoading, setIsAuthLoading] = useState(false)
 
-  // New assessment form
-  const [newAssessment, setNewAssessment] = useState({
+  // Assessment form state
+  const [editingAssessment, setEditingAssessment] = useState(null)
+  const [assessmentForm, setAssessmentForm] = useState({
     title: '',
     subject: '',
     description: '',
     duration: 30,
     status: 'draft'
   })
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Assessment detail view
+  const [selectedAssessment, setSelectedAssessment] = useState(null)
+  const [studentAnswer, setStudentAnswer] = useState('')
+  const [feedbackResult, setFeedbackResult] = useState(null)
+  const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false)
 
   useEffect(() => {
     if (token) {
@@ -92,6 +122,17 @@ function App() {
       localStorage.removeItem('auth_token')
     }
   }, [token])
+
+  // Clear messages after 5 seconds
+  useEffect(() => {
+    if (error || success) {
+      const timer = setTimeout(() => {
+        setError('')
+        setSuccess('')
+      }, 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [error, success])
 
   const fetchProfile = useCallback(async () => {
     if (!token) {
@@ -123,7 +164,7 @@ function App() {
         setStats(data.stats ?? { total: 0, active: 0, responses: 0, avgScore: 0 })
       }
     } catch {
-      // silently fail
+      setError('Nu s-au putut încărca evaluările.')
     } finally {
       setIsLoading(false)
     }
@@ -159,10 +200,11 @@ function App() {
         })
         if (!res.ok) {
           const err = await res.json().catch(() => ({}))
-          throw new Error(err.detail ?? 'Registration failed')
+          throw new Error(err.detail ?? 'Înregistrarea a eșuat')
         }
         setAuthMode('login')
         setAuthError('')
+        setAuthForm(initialAuthState)
         return
       }
 
@@ -173,7 +215,7 @@ function App() {
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail ?? 'Login failed')
+        throw new Error(err.detail ?? 'Autentificarea a eșuat')
       }
       const data = await res.json()
       setToken(data.access_token)
@@ -192,24 +234,128 @@ function App() {
     setView('dashboard')
   }
 
-  const handleCreateAssessment = async (e) => {
+  const resetAssessmentForm = () => {
+    setAssessmentForm({ title: '', subject: '', description: '', duration: 30, status: 'draft' })
+    setEditingAssessment(null)
+  }
+
+  const handleSaveAssessment = async (e) => {
     e.preventDefault()
+    if (!assessmentForm.title.trim()) {
+      setError('Titlul este obligatoriu.')
+      return
+    }
+    
+    setIsSubmitting(true)
+    setError('')
+    
     try {
-      const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/`, {
+      const url = editingAssessment
+        ? `${API_URL}${API_PREFIX}/evaluations/${editingAssessment.id}`
+        : `${API_URL}${API_PREFIX}/evaluations/`
+      
+      const res = await fetch(url, {
+        method: editingAssessment ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(assessmentForm)
+      })
+      
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail ?? 'A apărut o eroare.')
+      }
+      
+      setSuccess(editingAssessment ? 'Evaluare actualizată!' : 'Evaluare creată cu succes!')
+      resetAssessmentForm()
+      setView('dashboard')
+      fetchAssessments()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleEditAssessment = (assessment) => {
+    setEditingAssessment(assessment)
+    setAssessmentForm({
+      title: assessment.title,
+      subject: assessment.subject || '',
+      description: assessment.description || '',
+      duration: assessment.duration,
+      status: assessment.status
+    })
+    setView('new')
+  }
+
+  const handleDeleteAssessment = async (id) => {
+    if (!window.confirm('Sigur vrei să ștergi această evaluare?')) return
+    
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      
+      if (!res.ok) throw new Error('Ștergerea a eșuat.')
+      
+      setSuccess('Evaluare ștearsă!')
+      fetchAssessments()
+      if (selectedAssessment?.id === id) {
+        setSelectedAssessment(null)
+        setView('dashboard')
+      }
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const handleOpenAssessment = (assessment) => {
+    setSelectedAssessment(assessment)
+    setStudentAnswer('')
+    setFeedbackResult(null)
+    setView('detail')
+  }
+
+  const handleSubmitAnswer = async (e) => {
+    e.preventDefault()
+    if (!studentAnswer.trim()) {
+      setError('Introdu un răspuns.')
+      return
+    }
+    
+    setIsGeneratingFeedback(true)
+    setError('')
+    
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/feedback/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify(newAssessment)
+        body: JSON.stringify({
+          answer: studentAnswer,
+          evaluation_id: selectedAssessment.id,
+          mode: 'rule_based'
+        })
       })
-      if (res.ok) {
-        setNewAssessment({ title: '', subject: '', description: '', duration: 30, status: 'draft' })
-        setView('dashboard')
-        fetchAssessments()
+      
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail ?? 'Nu s-a putut genera feedback-ul.')
       }
-    } catch {
-      // handle error
+      
+      const data = await res.json()
+      setFeedbackResult(data)
+      fetchAssessments() // Refresh to update response count
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setIsGeneratingFeedback(false)
     }
   }
 
@@ -254,19 +400,19 @@ function App() {
               {authMode === 'register' && (
                 <>
                   <label>
-                    Full Name
+                    Nume complet
                     <input
                       type="text"
                       value={authForm.fullName}
                       onChange={handleAuthChange('fullName')}
-                      placeholder="John Doe"
+                      placeholder="Ion Popescu"
                     />
                   </label>
                   <label>
-                    Role
+                    Rol
                     <select value={authForm.role} onChange={handleAuthChange('role')}>
                       <option value="student">Student</option>
-                      <option value="professor">Professor</option>
+                      <option value="professor">Profesor</option>
                     </select>
                   </label>
                 </>
@@ -277,23 +423,24 @@ function App() {
                   type="email"
                   value={authForm.email}
                   onChange={handleAuthChange('email')}
-                  placeholder="you@university.edu"
+                  placeholder="email@universitate.ro"
                   required
                 />
               </label>
               <label>
-                Password
+                Parolă
                 <input
                   type="password"
                   value={authForm.password}
                   onChange={handleAuthChange('password')}
                   placeholder="••••••••"
                   required
+                  minLength={6}
                 />
               </label>
               {authError && <p className="error-msg">{authError}</p>}
               <button type="submit" className="btn-primary" disabled={isAuthLoading}>
-                {isAuthLoading ? 'Please wait...' : authMode === 'login' ? 'Sign In' : 'Create Account'}
+                {isAuthLoading ? 'Se procesează...' : authMode === 'login' ? 'Intră în cont' : 'Creează cont'}
               </button>
             </form>
           </div>
@@ -302,97 +449,221 @@ function App() {
     )
   }
 
-  // New Assessment view
-  if (view === 'new') {
+  // Navbar component
+  const Navbar = () => (
+    <header className="navbar">
+      <div className="nav-brand">
+        <div className="logo-icon">
+          <Icons.Logo />
+        </div>
+        <span>AI Student Evaluator</span>
+      </div>
+      <nav className="nav-links">
+        <button 
+          className={view === 'dashboard' ? 'active' : ''} 
+          onClick={() => { setView('dashboard'); resetAssessmentForm(); setSelectedAssessment(null); }}
+        >
+          <Icons.Dashboard />
+          <span>Dashboard</span>
+        </button>
+        <button 
+          className={view === 'new' ? 'active' : ''} 
+          onClick={() => { setView('new'); resetAssessmentForm(); }}
+        >
+          <Icons.Plus />
+          <span>New Assessment</span>
+        </button>
+        <button className="icon-only" onClick={handleLogout} title="Logout">
+          <Icons.Logout />
+        </button>
+      </nav>
+    </header>
+  )
+
+  // Notification component
+  const Notifications = () => (
+    <>
+      {error && <div className="notification error">{error}</div>}
+      {success && <div className="notification success">{success}</div>}
+    </>
+  )
+
+  // Assessment Detail view
+  if (view === 'detail' && selectedAssessment) {
     return (
       <div className="app-layout">
-        <header className="navbar">
-          <div className="nav-brand">
-            <div className="logo-icon">
-              <Icons.Logo />
-            </div>
-            <span>AI Student Evaluator</span>
-          </div>
-          <nav className="nav-links">
-            <button onClick={() => setView('dashboard')}>
-              <Icons.Dashboard />
-              Dashboard
-            </button>
-            <button className="active">
-              <Icons.Plus />
-              New Assessment
-            </button>
-            <button className="icon-only" onClick={handleLogout} title="Logout">
-              <Icons.Logout />
-            </button>
-          </nav>
-        </header>
-
+        <Navbar />
+        <Notifications />
         <main className="main-content">
           <div className="page-header">
             <div>
-              <h1>New Assessment</h1>
-              <p>Create a new assessment for your students</p>
+              <button className="btn-back" onClick={() => setView('dashboard')}>
+                <Icons.Back />
+                Înapoi
+              </button>
+              <h1>{selectedAssessment.title}</h1>
+              <p>{selectedAssessment.subject || 'Evaluare generală'}</p>
+            </div>
+            <div className="header-actions">
+              <span className={`status-badge ${selectedAssessment.status}`}>
+                {selectedAssessment.status}
+              </span>
+              {user?.role === 'professor' && (
+                <>
+                  <button className="btn-secondary" onClick={() => handleEditAssessment(selectedAssessment)}>
+                    <Icons.Edit />
+                    Editează
+                  </button>
+                  <button className="btn-danger" onClick={() => handleDeleteAssessment(selectedAssessment.id)}>
+                    <Icons.Delete />
+                    Șterge
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
-          <form className="assessment-form" onSubmit={handleCreateAssessment}>
+          <div className="detail-grid">
+            <div className="detail-info">
+              <div className="info-card">
+                <h3>Descriere</h3>
+                <p>{selectedAssessment.description || 'Nicio descriere disponibilă.'}</p>
+              </div>
+              <div className="info-card">
+                <h3>Detalii</h3>
+                <div className="info-row">
+                  <span><Icons.Clock /> Durată:</span>
+                  <strong>{selectedAssessment.duration} minute</strong>
+                </div>
+                <div className="info-row">
+                  <span><Icons.People /> Răspunsuri:</span>
+                  <strong>{selectedAssessment.response_count}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="answer-section">
+              <div className="info-card">
+                <h3>Trimite răspunsul tău</h3>
+                <form onSubmit={handleSubmitAnswer}>
+                  <textarea
+                    value={studentAnswer}
+                    onChange={(e) => setStudentAnswer(e.target.value)}
+                    placeholder="Scrie răspunsul tău aici..."
+                    rows={8}
+                    disabled={isGeneratingFeedback}
+                  />
+                  <button 
+                    type="submit" 
+                    className="btn-primary" 
+                    disabled={isGeneratingFeedback || !studentAnswer.trim()}
+                  >
+                    {isGeneratingFeedback ? 'Se generează feedback...' : (
+                      <>
+                        <Icons.Send />
+                        Trimite și primește feedback
+                      </>
+                    )}
+                  </button>
+                </form>
+              </div>
+
+              {feedbackResult && (
+                <div className="info-card feedback-card">
+                  <h3>Feedback primit</h3>
+                  <ul className="feedback-list">
+                    {feedbackResult.feedback?.map((item, index) => (
+                      <li key={index}>
+                        <span className="badge">{item.category}</span>
+                        <p>{item.message}</p>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        </main>
+      </div>
+    )
+  }
+
+  // New/Edit Assessment view
+  if (view === 'new') {
+    return (
+      <div className="app-layout">
+        <Navbar />
+        <Notifications />
+        <main className="main-content">
+          <div className="page-header">
+            <div>
+              <h1>{editingAssessment ? 'Editează evaluarea' : 'Evaluare nouă'}</h1>
+              <p>{editingAssessment ? 'Modifică detaliile evaluării' : 'Creează o evaluare nouă pentru studenți'}</p>
+            </div>
+          </div>
+
+          <form className="assessment-form" onSubmit={handleSaveAssessment}>
             <label>
-              Title *
+              Titlu *
               <input
                 type="text"
-                value={newAssessment.title}
-                onChange={(e) => setNewAssessment((p) => ({ ...p, title: e.target.value }))}
-                placeholder="e.g., Chapter 3: Cell Biology Quiz"
+                value={assessmentForm.title}
+                onChange={(e) => setAssessmentForm((p) => ({ ...p, title: e.target.value }))}
+                placeholder="ex: Capitolul 3: Quiz Biologie Celulară"
                 required
               />
             </label>
             <label>
-              Subject
+              Materie
               <input
                 type="text"
-                value={newAssessment.subject}
-                onChange={(e) => setNewAssessment((p) => ({ ...p, subject: e.target.value }))}
-                placeholder="e.g., Biology"
+                value={assessmentForm.subject}
+                onChange={(e) => setAssessmentForm((p) => ({ ...p, subject: e.target.value }))}
+                placeholder="ex: Biologie"
               />
             </label>
             <label>
-              Description
+              Descriere
               <textarea
-                value={newAssessment.description}
-                onChange={(e) => setNewAssessment((p) => ({ ...p, description: e.target.value }))}
-                placeholder="Describe what this assessment covers..."
+                value={assessmentForm.description}
+                onChange={(e) => setAssessmentForm((p) => ({ ...p, description: e.target.value }))}
+                placeholder="Descrie ce acoperă această evaluare..."
                 rows={4}
               />
             </label>
             <div className="form-row">
               <label>
-                Duration (minutes)
+                Durată (minute)
                 <input
                   type="number"
                   min="5"
-                  value={newAssessment.duration}
-                  onChange={(e) => setNewAssessment((p) => ({ ...p, duration: Number(e.target.value) }))}
+                  max="180"
+                  value={assessmentForm.duration}
+                  onChange={(e) => setAssessmentForm((p) => ({ ...p, duration: Number(e.target.value) }))}
                 />
               </label>
               <label>
                 Status
                 <select
-                  value={newAssessment.status}
-                  onChange={(e) => setNewAssessment((p) => ({ ...p, status: e.target.value }))}
+                  value={assessmentForm.status}
+                  onChange={(e) => setAssessmentForm((p) => ({ ...p, status: e.target.value }))}
                 >
                   <option value="draft">Draft</option>
-                  <option value="active">Active</option>
-                  <option value="closed">Closed</option>
+                  <option value="active">Activ</option>
+                  <option value="closed">Închis</option>
                 </select>
               </label>
             </div>
             <div className="form-actions">
-              <button type="button" className="btn-secondary" onClick={() => setView('dashboard')}>
-                Cancel
+              <button 
+                type="button" 
+                className="btn-secondary" 
+                onClick={() => { setView('dashboard'); resetAssessmentForm(); }}
+              >
+                Anulează
               </button>
-              <button type="submit" className="btn-primary">
-                Create Assessment
+              <button type="submit" className="btn-primary" disabled={isSubmitting}>
+                {isSubmitting ? 'Se salvează...' : editingAssessment ? 'Salvează modificările' : 'Creează evaluarea'}
               </button>
             </div>
           </form>
@@ -404,44 +675,24 @@ function App() {
   // Dashboard view
   return (
     <div className="app-layout">
-      <header className="navbar">
-        <div className="nav-brand">
-          <div className="logo-icon">
-            <Icons.Logo />
-          </div>
-          <span>AI Student Evaluator</span>
-        </div>
-        <nav className="nav-links">
-          <button className="active">
-            <Icons.Dashboard />
-            Dashboard
-          </button>
-          <button onClick={() => setView('new')}>
-            <Icons.Plus />
-            New Assessment
-          </button>
-          <button className="icon-only" onClick={handleLogout} title="Logout">
-            <Icons.Logout />
-          </button>
-        </nav>
-      </header>
-
+      <Navbar />
+      <Notifications />
       <main className="main-content">
         <div className="page-header">
           <div>
             <h1>Dashboard</h1>
-            <p>Manage your assessments and track student progress</p>
+            <p>Gestionează evaluările și urmărește progresul studenților</p>
           </div>
           <button className="btn-primary" onClick={() => setView('new')}>
             <Icons.Plus />
-            New Assessment
+            Evaluare nouă
           </button>
         </div>
 
         <div className="stats-grid">
           <div className="stat-card">
             <div className="stat-info">
-              <span className="stat-label">TOTAL ASSESSMENTS</span>
+              <span className="stat-label">TOTAL EVALUĂRI</span>
               <span className="stat-value">{stats.total}</span>
             </div>
             <div className="stat-icon blue">
@@ -450,7 +701,7 @@ function App() {
           </div>
           <div className="stat-card">
             <div className="stat-info">
-              <span className="stat-label">ACTIVE NOW</span>
+              <span className="stat-label">ACTIVE</span>
               <span className="stat-value">{stats.active}</span>
             </div>
             <div className="stat-icon green">
@@ -459,7 +710,7 @@ function App() {
           </div>
           <div className="stat-card">
             <div className="stat-info">
-              <span className="stat-label">TOTAL RESPONSES</span>
+              <span className="stat-label">TOTAL RĂSPUNSURI</span>
               <span className="stat-value">{stats.responses}</span>
             </div>
             <div className="stat-icon orange">
@@ -468,7 +719,7 @@ function App() {
           </div>
           <div className="stat-card">
             <div className="stat-info">
-              <span className="stat-label">AVG. SCORE</span>
+              <span className="stat-label">SCOR MEDIU</span>
               <span className="stat-value">{stats.avgScore}%</span>
             </div>
             <div className="stat-icon pink">
@@ -482,39 +733,57 @@ function App() {
             <Icons.Search />
             <input
               type="text"
-              placeholder="Search assessments..."
+              placeholder="Caută evaluări..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
           <div className="filter-tabs">
-            {['all', 'draft', 'active', 'closed'].map((f) => (
-              <button
-                key={f}
-                className={filter === f ? 'active' : ''}
-                onClick={() => setFilter(f)}
-              >
-                {f.charAt(0).toUpperCase() + f.slice(1)}
-                {f === 'all' && 's'}
-              </button>
-            ))}
+            <button
+              className={filter === 'all' ? 'active' : ''}
+              onClick={() => setFilter('all')}
+            >
+              Toate
+            </button>
+            <button
+              className={filter === 'draft' ? 'active' : ''}
+              onClick={() => setFilter('draft')}
+            >
+              Draft
+            </button>
+            <button
+              className={filter === 'active' ? 'active' : ''}
+              onClick={() => setFilter('active')}
+            >
+              Active
+            </button>
+            <button
+              className={filter === 'closed' ? 'active' : ''}
+              onClick={() => setFilter('closed')}
+            >
+              Închise
+            </button>
           </div>
         </div>
 
         <div className="assessments-grid">
           {isLoading ? (
-            <p className="loading">Loading assessments...</p>
+            <p className="loading">Se încarcă evaluările...</p>
           ) : filteredAssessments.length === 0 ? (
             <div className="empty-state">
               <Icons.Document />
-              <p>No assessments found</p>
+              <p>Nu există evaluări{filter !== 'all' ? ` cu statusul "${filter}"` : ''}</p>
               <button className="btn-primary" onClick={() => setView('new')}>
-                Create your first assessment
+                Creează prima evaluare
               </button>
             </div>
           ) : (
             filteredAssessments.map((assessment) => (
-              <div className="assessment-card" key={assessment.id}>
+              <div 
+                className="assessment-card" 
+                key={assessment.id}
+                onClick={() => handleOpenAssessment(assessment)}
+              >
                 <div className="card-header">
                   <div className="card-icon">
                     <Icons.Document />
@@ -526,20 +795,20 @@ function App() {
                   <span className={`status-badge ${assessment.status}`}>{assessment.status}</span>
                 </div>
                 <p className="card-description">
-                  {assessment.description || 'No description provided'}
+                  {assessment.description || 'Nicio descriere disponibilă'}
                 </p>
                 <div className="card-footer">
                   <div className="card-meta">
                     <span>
                       <Icons.People />
-                      {assessment.response_count ?? 0} responses
+                      {assessment.response_count ?? 0} răspunsuri
                     </span>
                     <span>
                       <Icons.Clock />
                       {assessment.duration ?? 30} min
                     </span>
                   </div>
-                  <button className="btn-icon">
+                  <button className="btn-icon" onClick={(e) => { e.stopPropagation(); handleOpenAssessment(assessment); }}>
                     <Icons.Arrow />
                   </button>
                 </div>
