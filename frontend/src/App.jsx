@@ -105,14 +105,15 @@ function App() {
     subject: '',
     description: '',
     duration: 30,
-    status: 'draft'
+    status: 'draft',
+    questions: []
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Assessment detail view
   const [selectedAssessment, setSelectedAssessment] = useState(null)
-  const [studentAnswer, setStudentAnswer] = useState('')
-  const [feedbackResult, setFeedbackResult] = useState(null)
+  const [answers, setAnswers] = useState({})
+  const [feedbackResults, setFeedbackResults] = useState({})
   const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false)
 
   useEffect(() => {
@@ -234,8 +235,24 @@ function App() {
     setView('dashboard')
   }
 
+  const QUESTION_TYPES = [
+    { value: 'long_answer', label: 'Răspuns lung' },
+    { value: 'short_answer', label: 'Răspuns scurt' },
+    { value: 'multiple_choice', label: 'Alegere multiplă' },
+    { value: 'checkboxes', label: 'Checkbox-uri' },
+  ]
+
+  const emptyQuestion = () => ({
+    _key: Date.now() + Math.random(),
+    question_type: 'long_answer',
+    text: '',
+    options: null,
+    correct_answer: '',
+    points: 10,
+  })
+
   const resetAssessmentForm = () => {
-    setAssessmentForm({ title: '', subject: '', description: '', duration: 30, status: 'draft' })
+    setAssessmentForm({ title: '', subject: '', description: '', duration: 30, status: 'draft', questions: [] })
     setEditingAssessment(null)
   }
 
@@ -254,13 +271,20 @@ function App() {
         ? `${API_URL}${API_PREFIX}/evaluations/${editingAssessment.id}`
         : `${API_URL}${API_PREFIX}/evaluations/`
       
+      const payload = {
+        ...assessmentForm,
+        questions: assessmentForm.questions.map(({ _key, ...rest }, idx) => ({
+          ...rest,
+          order: idx,
+        })),
+      }
       const res = await fetch(url, {
         method: editingAssessment ? 'PUT' : 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify(assessmentForm)
+        body: JSON.stringify(payload)
       })
       
       if (!res.ok) {
@@ -286,9 +310,84 @@ function App() {
       subject: assessment.subject || '',
       description: assessment.description || '',
       duration: assessment.duration,
-      status: assessment.status
+      status: assessment.status,
+      questions: (assessment.questions || []).map((q) => ({
+        ...q,
+        _key: q.id || Date.now() + Math.random(),
+        options: q.options || null,
+        correct_answer: q.correct_answer || '',
+      })),
     })
     setView('new')
+  }
+
+  const addQuestion = () => {
+    setAssessmentForm((p) => ({
+      ...p,
+      questions: [...p.questions, emptyQuestion()],
+    }))
+  }
+
+  const updateQuestion = (index, field, value) => {
+    setAssessmentForm((p) => {
+      const questions = [...p.questions]
+      questions[index] = { ...questions[index], [field]: value }
+      if (field === 'question_type') {
+        if (value === 'multiple_choice' || value === 'checkboxes') {
+          if (!questions[index].options || questions[index].options.length === 0) {
+            questions[index].options = ['', '', '', '']
+          }
+        } else {
+          questions[index].options = null
+        }
+      }
+      return { ...p, questions }
+    })
+  }
+
+  const updateOption = (qIndex, optIndex, value) => {
+    setAssessmentForm((p) => {
+      const questions = [...p.questions]
+      const options = [...(questions[qIndex].options || [])]
+      options[optIndex] = value
+      questions[qIndex] = { ...questions[qIndex], options }
+      return { ...p, questions }
+    })
+  }
+
+  const addOption = (qIndex) => {
+    setAssessmentForm((p) => {
+      const questions = [...p.questions]
+      const options = [...(questions[qIndex].options || []), '']
+      questions[qIndex] = { ...questions[qIndex], options }
+      return { ...p, questions }
+    })
+  }
+
+  const removeOption = (qIndex, optIndex) => {
+    setAssessmentForm((p) => {
+      const questions = [...p.questions]
+      const options = (questions[qIndex].options || []).filter((_, i) => i !== optIndex)
+      questions[qIndex] = { ...questions[qIndex], options }
+      return { ...p, questions }
+    })
+  }
+
+  const removeQuestion = (index) => {
+    setAssessmentForm((p) => ({
+      ...p,
+      questions: p.questions.filter((_, i) => i !== index),
+    }))
+  }
+
+  const moveQuestion = (index, direction) => {
+    setAssessmentForm((p) => {
+      const questions = [...p.questions]
+      const target = index + direction
+      if (target < 0 || target >= questions.length) return p
+      ;[questions[index], questions[target]] = [questions[target], questions[index]]
+      return { ...p, questions }
+    })
   }
 
   const handleDeleteAssessment = async (id) => {
@@ -315,14 +414,13 @@ function App() {
 
   const handleOpenAssessment = (assessment) => {
     setSelectedAssessment(assessment)
-    setStudentAnswer('')
-    setFeedbackResult(null)
+    setAnswers({})
+    setFeedbackResults({})
     setView('detail')
   }
 
-  const handleSubmitAnswer = async (e) => {
-    e.preventDefault()
-    if (!studentAnswer.trim()) {
+  const handleSubmitAnswer = async (questionId, answerText) => {
+    if (!answerText?.trim()) {
       setError('Introdu un răspuns.')
       return
     }
@@ -338,7 +436,7 @@ function App() {
           Authorization: `Bearer ${token}`
         },
         body: JSON.stringify({
-          answer: studentAnswer,
+          answer: answerText,
           evaluation_id: selectedAssessment.id,
           mode: 'rule_based'
         })
@@ -350,13 +448,27 @@ function App() {
       }
       
       const data = await res.json()
-      setFeedbackResult(data)
-      fetchAssessments() // Refresh to update response count
+      setFeedbackResults((prev) => ({ ...prev, [questionId]: data }))
+      fetchAssessments()
     } catch (err) {
       setError(err.message)
     } finally {
       setIsGeneratingFeedback(false)
     }
+  }
+
+  const handleSubmitAllAnswers = async (e) => {
+    e.preventDefault()
+    const questions = selectedAssessment.questions || []
+    if (questions.length === 0) return
+    
+    for (const q of questions) {
+      const ans = answers[q.id]
+      if (ans?.trim()) {
+        await handleSubmitAnswer(q.id, ans)
+      }
+    }
+    setSuccess('Toate răspunsurile au fost trimise!')
   }
 
   const filteredAssessments = assessments.filter((a) => {
@@ -466,13 +578,15 @@ function App() {
           <Icons.Dashboard />
           <span>Dashboard</span>
         </button>
-        <button 
-          className={view === 'new' ? 'active' : ''} 
-          onClick={() => { setView('new'); resetAssessmentForm(); }}
-        >
-          <Icons.Plus />
-          <span>New Assessment</span>
-        </button>
+        {user?.role === 'professor' && (
+          <button 
+            className={view === 'new' ? 'active' : ''} 
+            onClick={() => { setView('new'); resetAssessmentForm(); }}
+          >
+            <Icons.Plus />
+            <span>New Assessment</span>
+          </button>
+        )}
         <button className="icon-only" onClick={handleLogout} title="Logout">
           <Icons.Logout />
         </button>
@@ -523,8 +637,8 @@ function App() {
             </div>
           </div>
 
-          <div className="detail-grid">
-            <div className="detail-info">
+          <div className="detail-layout">
+            <div className="detail-sidebar">
               <div className="info-card">
                 <h3>Descriere</h3>
                 <p>{selectedAssessment.description || 'Nicio descriere disponibilă.'}</p>
@@ -539,47 +653,117 @@ function App() {
                   <span><Icons.People /> Răspunsuri:</span>
                   <strong>{selectedAssessment.response_count}</strong>
                 </div>
+                <div className="info-row">
+                  <span><Icons.Document /> Exerciții:</span>
+                  <strong>{(selectedAssessment.questions || []).length}</strong>
+                </div>
               </div>
             </div>
 
-            <div className="answer-section">
-              <div className="info-card">
-                <h3>Trimite răspunsul tău</h3>
-                <form onSubmit={handleSubmitAnswer}>
-                  <textarea
-                    value={studentAnswer}
-                    onChange={(e) => setStudentAnswer(e.target.value)}
-                    placeholder="Scrie răspunsul tău aici..."
-                    rows={8}
-                    disabled={isGeneratingFeedback}
-                  />
+            <div className="detail-questions">
+              {(!selectedAssessment.questions || selectedAssessment.questions.length === 0) ? (
+                <div className="info-card">
+                  <p className="text-muted">Această evaluare nu conține exerciții.</p>
+                </div>
+              ) : (
+                <form onSubmit={handleSubmitAllAnswers}>
+                  {selectedAssessment.questions.map((q, idx) => (
+                    <div className="question-card" key={q.id}>
+                      <div className="question-header">
+                        <span className="question-number">Exercițiul {idx + 1}</span>
+                        <span className="question-points">{q.points} puncte</span>
+                      </div>
+                      <p className="question-text">{q.text}</p>
+
+                      {(q.question_type === 'multiple_choice') && q.options && (
+                        <div className="question-options">
+                          {q.options.map((opt, oi) => (
+                            <label key={oi} className="option-label">
+                              <input
+                                type="radio"
+                                name={`q-${q.id}`}
+                                value={opt}
+                                checked={answers[q.id] === opt}
+                                onChange={() => setAnswers((p) => ({ ...p, [q.id]: opt }))}
+                              />
+                              <span>{opt}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+
+                      {(q.question_type === 'checkboxes') && q.options && (
+                        <div className="question-options">
+                          {q.options.map((opt, oi) => {
+                            const selected = (answers[q.id] || '').split('||')
+                            const isChecked = selected.includes(opt)
+                            return (
+                              <label key={oi} className="option-label">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {
+                                    const next = isChecked
+                                      ? selected.filter((s) => s !== opt)
+                                      : [...selected.filter(Boolean), opt]
+                                    setAnswers((p) => ({ ...p, [q.id]: next.join('||') }))
+                                  }}
+                                />
+                                <span>{opt}</span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      )}
+
+                      {q.question_type === 'short_answer' && (
+                        <input
+                          type="text"
+                          className="question-input"
+                          placeholder="Răspunsul tău..."
+                          value={answers[q.id] || ''}
+                          onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
+                        />
+                      )}
+
+                      {q.question_type === 'long_answer' && (
+                        <textarea
+                          className="question-textarea"
+                          placeholder="Scrie răspunsul tău aici..."
+                          rows={5}
+                          value={answers[q.id] || ''}
+                          onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
+                        />
+                      )}
+
+                      {feedbackResults[q.id] && (
+                        <div className="question-feedback">
+                          <h4>Feedback</h4>
+                          <ul className="feedback-list">
+                            {feedbackResults[q.id].feedback?.map((item, fi) => (
+                              <li key={fi}>
+                                <span className="badge">{item.category}</span>
+                                <p>{item.message}</p>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  ))}
                   <button 
                     type="submit" 
-                    className="btn-primary" 
-                    disabled={isGeneratingFeedback || !studentAnswer.trim()}
+                    className="btn-primary submit-all-btn"
+                    disabled={isGeneratingFeedback}
                   >
                     {isGeneratingFeedback ? 'Se generează feedback...' : (
                       <>
                         <Icons.Send />
-                        Trimite și primește feedback
+                        Trimite toate răspunsurile
                       </>
                     )}
                   </button>
                 </form>
-              </div>
-
-              {feedbackResult && (
-                <div className="info-card feedback-card">
-                  <h3>Feedback primit</h3>
-                  <ul className="feedback-list">
-                    {feedbackResult.feedback?.map((item, index) => (
-                      <li key={index}>
-                        <span className="badge">{item.category}</span>
-                        <p>{item.message}</p>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
               )}
             </div>
           </div>
@@ -628,7 +812,7 @@ function App() {
                 value={assessmentForm.description}
                 onChange={(e) => setAssessmentForm((p) => ({ ...p, description: e.target.value }))}
                 placeholder="Descrie ce acoperă această evaluare..."
-                rows={4}
+                rows={3}
               />
             </label>
             <div className="form-row">
@@ -654,6 +838,101 @@ function App() {
                 </select>
               </label>
             </div>
+
+            <div className="questions-builder">
+              <div className="questions-header">
+                <h3>Exerciții ({assessmentForm.questions.length})</h3>
+                <button type="button" className="btn-secondary" onClick={addQuestion}>
+                  <Icons.Plus />
+                  Adaugă exercițiu
+                </button>
+              </div>
+
+              {assessmentForm.questions.length === 0 && (
+                <div className="questions-empty">
+                  <p>Nu ai adăugat niciun exercițiu. Click pe &quot;Adaugă exercițiu&quot; pentru a începe.</p>
+                </div>
+              )}
+
+              {assessmentForm.questions.map((q, idx) => (
+                <div className="question-builder-card" key={q._key || q.id || idx}>
+                  <div className="qb-header">
+                    <span className="question-number">Exercițiul {idx + 1}</span>
+                    <div className="qb-actions">
+                      <button type="button" disabled={idx === 0} onClick={() => moveQuestion(idx, -1)} title="Mută sus">↑</button>
+                      <button type="button" disabled={idx === assessmentForm.questions.length - 1} onClick={() => moveQuestion(idx, 1)} title="Mută jos">↓</button>
+                      <button type="button" className="qb-delete" onClick={() => removeQuestion(idx)} title="Șterge">
+                        <Icons.Delete />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="qb-row">
+                    <label className="qb-type">
+                      Tip
+                      <select value={q.question_type} onChange={(e) => updateQuestion(idx, 'question_type', e.target.value)}>
+                        {QUESTION_TYPES.map((t) => (
+                          <option key={t.value} value={t.value}>{t.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="qb-points">
+                      Puncte
+                      <input
+                        type="number"
+                        min="1"
+                        max="100"
+                        value={q.points}
+                        onChange={(e) => updateQuestion(idx, 'points', Number(e.target.value))}
+                      />
+                    </label>
+                  </div>
+
+                  <label>
+                    Întrebare *
+                    <textarea
+                      value={q.text}
+                      onChange={(e) => updateQuestion(idx, 'text', e.target.value)}
+                      placeholder="Scrie întrebarea / enunțul exercițiului..."
+                      rows={2}
+                      required
+                    />
+                  </label>
+
+                  {(q.question_type === 'multiple_choice' || q.question_type === 'checkboxes') && (
+                    <div className="qb-options">
+                      <span className="qb-options-label">Opțiuni</span>
+                      {(q.options || []).map((opt, oi) => (
+                        <div className="qb-option-row" key={oi}>
+                          <span className="qb-option-bullet">{q.question_type === 'multiple_choice' ? '○' : '☐'}</span>
+                          <input
+                            type="text"
+                            value={opt}
+                            onChange={(e) => updateOption(idx, oi, e.target.value)}
+                            placeholder={`Opțiunea ${oi + 1}`}
+                          />
+                          <button type="button" className="qb-option-remove" onClick={() => removeOption(idx, oi)} title="Șterge opțiune">×</button>
+                        </div>
+                      ))}
+                      <button type="button" className="qb-add-option" onClick={() => addOption(idx)}>
+                        + Adaugă opțiune
+                      </button>
+                    </div>
+                  )}
+
+                  <label>
+                    Răspuns corect (opțional)
+                    <input
+                      type="text"
+                      value={q.correct_answer}
+                      onChange={(e) => updateQuestion(idx, 'correct_answer', e.target.value)}
+                      placeholder="Folosit pentru corectare automată (opțional)"
+                    />
+                  </label>
+                </div>
+              ))}
+            </div>
+
             <div className="form-actions">
               <button 
                 type="button" 
@@ -681,12 +960,14 @@ function App() {
         <div className="page-header">
           <div>
             <h1>Dashboard</h1>
-            <p>Gestionează evaluările și urmărește progresul studenților</p>
+            <p>{user?.role === 'professor' ? 'Gestionează evaluările și urmărește progresul studenților' : 'Evaluări disponibile'}</p>
           </div>
-          <button className="btn-primary" onClick={() => setView('new')}>
-            <Icons.Plus />
-            Evaluare nouă
-          </button>
+          {user?.role === 'professor' && (
+            <button className="btn-primary" onClick={() => setView('new')}>
+              <Icons.Plus />
+              Evaluare nouă
+            </button>
+          )}
         </div>
 
         <div className="stats-grid">
@@ -797,6 +1078,9 @@ function App() {
                 <p className="card-description">
                   {assessment.description || 'Nicio descriere disponibilă'}
                 </p>
+                {assessment.author_name && user?.role === 'student' && (
+                  <p className="card-author">Profesor: {assessment.author_name}</p>
+                )}
                 <div className="card-footer">
                   <div className="card-meta">
                     <span>
