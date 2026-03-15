@@ -21,7 +21,11 @@ class Evaluation(TimestampMixin, Base):
 
     author: Mapped[Optional["User"]] = relationship(back_populates="evaluations")
     responses: Mapped[List["Response"]] = relationship(back_populates="evaluation", cascade="all, delete")
+    questions: Mapped[List["Question"]] = relationship(
+        back_populates="evaluation", cascade="all, delete-orphan", order_by="Question.order"
+    )
 
 
+from .question import Question  # noqa: E402
 from .response import Response  # noqa: E402
 from .user import User  # noqa: E402

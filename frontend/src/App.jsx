@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import Silk from './components/Silk'
+import { ParticleCard, GlobalSpotlight, useMobileDetection } from './components/MagicBento'
+import rubrixLogo from './assets/rubrix-logo.svg'
 import './App.css'
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
@@ -7,9 +10,7 @@ const API_PREFIX = '/api/v1'
 // Icons as simple SVG components
 const Icons = {
   Logo: () => (
-    <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-      <path d="M12 3L1 9l4 2.18v6L12 21l7-3.82v-6l2-1.09V17h2V9L12 3zm6.82 6L12 12.72 5.18 9 12 5.28 18.82 9zM17 15.99l-5 2.73-5-2.73v-3.72L12 15l5-2.73v3.72z"/>
-    </svg>
+    <img src={rubrixLogo} alt="Rubrix" width="28" height="28" />
   ),
   Dashboard: () => (
     <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
@@ -115,6 +116,9 @@ function App() {
   const [answers, setAnswers] = useState({})
   const [feedbackResults, setFeedbackResults] = useState({})
   const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false)
+  const [feedbackMode, setFeedbackMode] = useState('ai')
+  const dashboardGridRef = useRef(null)
+  const isMobile = useMobileDetection()
 
   useEffect(() => {
     if (token) {
@@ -438,7 +442,7 @@ function App() {
         body: JSON.stringify({
           answer: answerText,
           evaluation_id: selectedAssessment.id,
-          mode: 'rule_based'
+          mode: feedbackMode
         })
       })
       
@@ -486,12 +490,15 @@ function App() {
   if (!isAuthenticated) {
     return (
       <div className="auth-page">
+        <div className="auth-silk-bg">
+          <Silk speed={5} scale={1} color="#6521a1" noiseIntensity={1.5} rotation={0} />
+        </div>
         <div className="auth-container">
           <div className="auth-logo">
             <div className="logo-icon">
               <Icons.Logo />
             </div>
-            <h1>AI Student Evaluator</h1>
+            <h1>Rubrix</h1>
           </div>
           <div className="auth-card">
             <div className="auth-tabs">
@@ -568,7 +575,7 @@ function App() {
         <div className="logo-icon">
           <Icons.Logo />
         </div>
-        <span>AI Student Evaluator</span>
+        <span>Rubrix</span>
       </div>
       <nav className="nav-links">
         <button 
@@ -743,6 +750,9 @@ function App() {
                             {feedbackResults[q.id].feedback?.map((item, fi) => (
                               <li key={fi}>
                                 <span className="badge">{item.category}</span>
+                                <span className={`badge source-badge ${item.source?.startsWith('ai:') ? 'ai' : 'rule'}`}>
+                                  {item.source?.startsWith('ai:') ? 'AI' : 'Reguli'}
+                                </span>
                                 <p>{item.message}</p>
                               </li>
                             ))}
@@ -751,18 +761,27 @@ function App() {
                       )}
                     </div>
                   ))}
-                  <button 
-                    type="submit" 
-                    className="btn-primary submit-all-btn"
-                    disabled={isGeneratingFeedback}
-                  >
-                    {isGeneratingFeedback ? 'Se generează feedback...' : (
-                      <>
-                        <Icons.Send />
-                        Trimite toate răspunsurile
-                      </>
-                    )}
-                  </button>
+                  <div className="submit-bar">
+                    <div className="feedback-mode-selector">
+                      <label>Mod feedback:</label>
+                      <select value={feedbackMode} onChange={(e) => setFeedbackMode(e.target.value)}>
+                        <option value="ai">AI (Groq)</option>
+                        <option value="rule_based">Reguli simple</option>
+                      </select>
+                    </div>
+                    <button 
+                      type="submit" 
+                      className="btn-primary submit-all-btn"
+                      disabled={isGeneratingFeedback}
+                    >
+                      {isGeneratingFeedback ? 'Se generează feedback...' : (
+                        <>
+                          <Icons.Send />
+                          Trimite toate răspunsurile
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </form>
               )}
             </div>
@@ -970,8 +989,9 @@ function App() {
           )}
         </div>
 
-        <div className="stats-grid">
-          <div className="stat-card">
+        <div className="stats-grid bento-section" ref={dashboardGridRef}>
+          <GlobalSpotlight gridRef={dashboardGridRef} disableAnimations={isMobile} spotlightRadius={400} glowColor="132, 0, 255" />
+          <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={12} glowColor="132, 0, 255" enableTilt={false} clickEffect>
             <div className="stat-info">
               <span className="stat-label">TOTAL EVALUĂRI</span>
               <span className="stat-value">{stats.total}</span>
@@ -979,8 +999,8 @@ function App() {
             <div className="stat-icon blue">
               <Icons.Document />
             </div>
-          </div>
-          <div className="stat-card">
+          </ParticleCard>
+          <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={12} glowColor="132, 0, 255" enableTilt={false} clickEffect>
             <div className="stat-info">
               <span className="stat-label">ACTIVE</span>
               <span className="stat-value">{stats.active}</span>
@@ -988,8 +1008,8 @@ function App() {
             <div className="stat-icon green">
               <Icons.Clock />
             </div>
-          </div>
-          <div className="stat-card">
+          </ParticleCard>
+          <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={12} glowColor="132, 0, 255" enableTilt={false} clickEffect>
             <div className="stat-info">
               <span className="stat-label">TOTAL RĂSPUNSURI</span>
               <span className="stat-value">{stats.responses}</span>
@@ -997,8 +1017,8 @@ function App() {
             <div className="stat-icon orange">
               <Icons.People />
             </div>
-          </div>
-          <div className="stat-card">
+          </ParticleCard>
+          <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={12} glowColor="132, 0, 255" enableTilt={false} clickEffect>
             <div className="stat-info">
               <span className="stat-label">SCOR MEDIU</span>
               <span className="stat-value">{stats.avgScore}%</span>
@@ -1006,7 +1026,7 @@ function App() {
             <div className="stat-icon pink">
               <Icons.Trend />
             </div>
-          </div>
+          </ParticleCard>
         </div>
 
         <div className="filters-bar">
@@ -1060,43 +1080,50 @@ function App() {
             </div>
           ) : (
             filteredAssessments.map((assessment) => (
-              <div 
-                className="assessment-card" 
+              <ParticleCard
+                className="assessment-card magic-bento-card magic-bento-card--border-glow"
                 key={assessment.id}
-                onClick={() => handleOpenAssessment(assessment)}
+                disableAnimations={isMobile}
+                particleCount={8}
+                glowColor="132, 0, 255"
+                enableTilt={false}
+                clickEffect
+                style={{ cursor: 'pointer' }}
               >
-                <div className="card-header">
-                  <div className="card-icon">
-                    <Icons.Document />
+                <div onClick={() => handleOpenAssessment(assessment)} style={{ display: 'contents' }}>
+                  <div className="card-header">
+                    <div className="card-icon">
+                      <Icons.Document />
+                    </div>
+                    <div className="card-title">
+                      <h3>{assessment.title}</h3>
+                      <span className="subject">{assessment.subject || 'General'}</span>
+                    </div>
+                    <span className={`status-badge ${assessment.status}`}>{assessment.status}</span>
                   </div>
-                  <div className="card-title">
-                    <h3>{assessment.title}</h3>
-                    <span className="subject">{assessment.subject || 'General'}</span>
+                  <p className="card-description">
+                    {assessment.description || 'Nicio descriere disponibilă'}
+                  </p>
+                  {assessment.author_name && user?.role === 'student' && (
+                    <p className="card-author">Profesor: {assessment.author_name}</p>
+                  )}
+                  <div className="card-footer">
+                    <div className="card-meta">
+                      <span>
+                        <Icons.People />
+                        {assessment.response_count ?? 0} răspunsuri
+                      </span>
+                      <span>
+                        <Icons.Clock />
+                        {assessment.duration ?? 30} min
+                      </span>
+                    </div>
+                    <button className="btn-icon" onClick={(e) => { e.stopPropagation(); handleOpenAssessment(assessment); }}>
+                      <Icons.Arrow />
+                    </button>
                   </div>
-                  <span className={`status-badge ${assessment.status}`}>{assessment.status}</span>
                 </div>
-                <p className="card-description">
-                  {assessment.description || 'Nicio descriere disponibilă'}
-                </p>
-                {assessment.author_name && user?.role === 'student' && (
-                  <p className="card-author">Profesor: {assessment.author_name}</p>
-                )}
-                <div className="card-footer">
-                  <div className="card-meta">
-                    <span>
-                      <Icons.People />
-                      {assessment.response_count ?? 0} răspunsuri
-                    </span>
-                    <span>
-                      <Icons.Clock />
-                      {assessment.duration ?? 30} min
-                    </span>
-                  </div>
-                  <button className="btn-icon" onClick={(e) => { e.stopPropagation(); handleOpenAssessment(assessment); }}>
-                    <Icons.Arrow />
-                  </button>
-                </div>
-              </div>
+              </ParticleCard>
             ))
           )}
         </div>

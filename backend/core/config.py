@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "Evaluator Inteligent API"
+    app_name: str = "Rubrix API"
     api_v1_prefix: str = "/api/v1"
 
     database_url: str = Field(
@@ -23,6 +23,9 @@ class Settings(BaseSettings):
 
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
+
+    groq_api_key: Optional[str] = None
+    groq_model: str = "llama-3.3-70b-versatile"
 
     huggingface_api_token: Optional[str] = None
     huggingface_model: Optional[str] = None
