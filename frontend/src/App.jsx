@@ -1102,8 +1102,7 @@ function App() {
     </header>
   )
 
-  // Notification component
-  const Notifications = () => (
+  const notifications = (
     <>
       {error && <div className="notification error">{error}</div>}
       {success && <div className="notification success">{success}</div>}
@@ -1146,7 +1145,7 @@ function App() {
     return (
       <div className="app-layout">
         <Navbar />
-        <Notifications />
+        {notifications}
         <main className="main-content">
           <div className="page-header">
             <div>
@@ -1541,7 +1540,7 @@ function App() {
     return (
       <div className="app-layout">
         <Navbar />
-        <Notifications />
+        {notifications}
         <main className="main-content">
           <div className="page-header">
             <div>
@@ -1640,7 +1639,7 @@ function App() {
     return (
       <div className="app-layout">
         <Navbar />
-        <Notifications />
+        {notifications}
         <main className="main-content">
           <div className="page-header">
             <div>
@@ -1820,7 +1819,7 @@ function App() {
   return (
     <div className="app-layout">
       <Navbar />
-      <Notifications />
+      {notifications}
       <main className="main-content">
         <div className="page-header">
           <div>
