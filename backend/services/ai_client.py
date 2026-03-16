@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
@@ -16,6 +17,7 @@ settings = get_settings()
 class AIResult:
     feedback: list[FeedbackItemSchema]
     token_usage: Optional[int] = None
+    score: Optional[int] = None
 
 
 def _parse_text_to_feedback(text: str, source: str) -> list[FeedbackItemSchema]:
@@ -47,6 +49,7 @@ def _build_prompts(
     rubric: Optional[Iterable[str]] = None,
     question_type: Optional[str] = None,
     question_text: Optional[str] = None,
+    max_points: Optional[int] = None,
 ) -> tuple[str, str]:
     rubric_prompt = (
         "\n".join(f"- {criterion}" for criterion in rubric)
@@ -70,28 +73,35 @@ def _build_prompts(
         )
     elif question_type == "short_answer":
         system_prompt = (
-            "Ești un profesor care oferă feedback concis pentru răspunsuri scurte. "
-            "Oferă maximum 2-3 observații, fiecare sub forma 'Categorie: mesaj'. "
-            "Concentrează-te pe corectitudine și completitudine. Scrie în limba română."
+            "Ești un profesor care evaluează răspunsuri scurte. "
+            "Returnează STRICT JSON valid cu schema: "
+            '{"score": <int>, "feedback": [{"category":"...", "message":"..."}]}. '
+            "score trebuie să fie între 0 și punctajul maxim primit. "
+            "feedback trebuie să aibă 2-4 observații utile. Scrie în limba română."
         )
+        max_points_text = f"{max_points}" if max_points is not None else "10"
         user_prompt = (
             f"{question_ctx}"
+            f"Punctaj maxim: {max_points_text}\n"
             f"Răspuns student:\n{answer}\n\n"
-            "Evaluează răspunsul scurt al studentului.\n"
-            "Returnează lista de observații, câte una pe linie."
+            "Evaluează răspunsul scurt al studentului și acordă punctaj."
         )
     else:
         system_prompt = (
-            "Ești un profesor care oferă feedback structurat și concis pentru răspunsurile studenților. "
-            "Oferă maximum 4 observații, fiecare sub forma 'Categorie: mesaj'. "
-            "Scrie în limba română."
+            "Ești un profesor care evaluează răspunsuri descriptive. "
+            "Returnează STRICT JSON valid cu schema: "
+            '{"score": <int>, "feedback": [{"category":"...", "message":"..."}]}. '
+            "score trebuie să fie între 0 și punctajul maxim primit. "
+            "feedback trebuie să aibă 3-5 observații utile. Scrie în limba română."
         )
+        max_points_text = f"{max_points}" if max_points is not None else "10"
         user_prompt = (
             f"{question_ctx}"
+            f"Punctaj maxim: {max_points_text}\n"
             f"Răspuns student:\n{answer}\n\n"
             "Evaluează folosind această rubrică:\n"
             f"{rubric_prompt}\n\n"
-            "Returnează lista de observații, câte una pe linie."
+            "Acordă punctaj și feedback conform rubricii."
         )
 
     return system_prompt, user_prompt
@@ -106,8 +116,9 @@ async def _generate_with_openai_compatible(
     base_url: Optional[str] = None,
     question_type: Optional[str] = None,
     question_text: Optional[str] = None,
+    max_points: Optional[int] = None,
 ) -> AIResult:
-    system_prompt, user_prompt = _build_prompts(answer, rubric, question_type, question_text)
+    system_prompt, user_prompt = _build_prompts(answer, rubric, question_type, question_text, max_points)
 
     client = AsyncOpenAI(api_key=api_key, base_url=base_url)
     response = await client.chat.completions.create(
@@ -118,7 +129,37 @@ async def _generate_with_openai_compatible(
     text_output = response.choices[0].message.content or ""
     total_tokens = response.usage.total_tokens if response.usage else None
 
-    return AIResult(feedback=_parse_text_to_feedback(text_output, source=source), token_usage=total_tokens)
+    parsed_score: Optional[int] = None
+    parsed_feedback: list[FeedbackItemSchema] = []
+
+    try:
+        parsed = json.loads(text_output)
+        if isinstance(parsed, dict):
+            raw_score = parsed.get("score")
+            if isinstance(raw_score, (int, float)):
+                parsed_score = int(round(raw_score))
+                if max_points is not None:
+                    parsed_score = max(0, min(parsed_score, max_points))
+                else:
+                    parsed_score = max(0, parsed_score)
+
+            raw_feedback = parsed.get("feedback", [])
+            if isinstance(raw_feedback, list):
+                for item in raw_feedback:
+                    if isinstance(item, dict):
+                        category = str(item.get("category", "Observație")).strip() or "Observație"
+                        message = str(item.get("message", "")).strip()
+                        if message:
+                            parsed_feedback.append(
+                                FeedbackItemSchema(category=category, message=message, source=source)
+                            )
+    except (json.JSONDecodeError, TypeError, ValueError):
+        parsed_feedback = []
+
+    if not parsed_feedback:
+        parsed_feedback = _parse_text_to_feedback(text_output, source=source)
+
+    return AIResult(feedback=parsed_feedback, token_usage=total_tokens, score=parsed_score)
 
 
 async def _generate_with_groq(
@@ -126,6 +167,7 @@ async def _generate_with_groq(
     rubric: Optional[Iterable[str]] = None,
     question_type: Optional[str] = None,
     question_text: Optional[str] = None,
+    max_points: Optional[int] = None,
 ) -> AIResult:
     if not settings.groq_api_key:
         raise RuntimeError("Groq API key is not configured")
@@ -139,6 +181,7 @@ async def _generate_with_groq(
         base_url="https://api.groq.com/openai/v1",
         question_type=question_type,
         question_text=question_text,
+        max_points=max_points,
     )
 
 
@@ -147,6 +190,7 @@ async def _generate_with_openai(
     rubric: Optional[Iterable[str]] = None,
     question_type: Optional[str] = None,
     question_text: Optional[str] = None,
+    max_points: Optional[int] = None,
 ) -> AIResult:
     if not settings.openai_api_key:
         raise RuntimeError("OpenAI API key is not configured")
@@ -159,6 +203,7 @@ async def _generate_with_openai(
         rubric=rubric,
         question_type=question_type,
         question_text=question_text,
+        max_points=max_points,
     )
 
 
@@ -167,12 +212,13 @@ async def _generate_with_huggingface(
     rubric: Optional[Iterable[str]] = None,
     question_type: Optional[str] = None,
     question_text: Optional[str] = None,
+    max_points: Optional[int] = None,
 ) -> AIResult:
     if not settings.huggingface_api_token or not settings.huggingface_model:
         raise RuntimeError("Hugging Face configuration missing")
 
     url = f"https://api-inference.huggingface.co/models/{settings.huggingface_model}"
-    system_prompt, user_prompt = _build_prompts(answer, rubric, question_type, question_text)
+    system_prompt, user_prompt = _build_prompts(answer, rubric, question_type, question_text, max_points)
     prompt = f"{system_prompt}\n\n{user_prompt}"
 
     headers = {
@@ -191,7 +237,35 @@ async def _generate_with_huggingface(
     else:
         text = str(data)
 
-    return AIResult(feedback=_parse_text_to_feedback(text, source="ai:huggingface"))
+    parsed_score: Optional[int] = None
+    parsed_feedback: list[FeedbackItemSchema] = []
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            raw_score = parsed.get("score")
+            if isinstance(raw_score, (int, float)):
+                parsed_score = int(round(raw_score))
+                if max_points is not None:
+                    parsed_score = max(0, min(parsed_score, max_points))
+                else:
+                    parsed_score = max(0, parsed_score)
+            raw_feedback = parsed.get("feedback", [])
+            if isinstance(raw_feedback, list):
+                for item in raw_feedback:
+                    if isinstance(item, dict):
+                        category = str(item.get("category", "Observație")).strip() or "Observație"
+                        message = str(item.get("message", "")).strip()
+                        if message:
+                            parsed_feedback.append(
+                                FeedbackItemSchema(category=category, message=message, source="ai:huggingface")
+                            )
+    except (json.JSONDecodeError, TypeError, ValueError):
+        parsed_feedback = []
+
+    if not parsed_feedback:
+        parsed_feedback = _parse_text_to_feedback(text, source="ai:huggingface")
+
+    return AIResult(feedback=parsed_feedback, score=parsed_score)
 
 
 async def generate_ai_feedback(
@@ -199,8 +273,15 @@ async def generate_ai_feedback(
     rubric: Optional[Iterable[str]] = None,
     question_type: Optional[str] = None,
     question_text: Optional[str] = None,
+    max_points: Optional[int] = None,
 ) -> AIResult:
-    kwargs = dict(answer=answer, rubric=rubric, question_type=question_type, question_text=question_text)
+    kwargs = dict(
+        answer=answer,
+        rubric=rubric,
+        question_type=question_type,
+        question_text=question_text,
+        max_points=max_points,
+    )
     if settings.groq_api_key:
         return await _generate_with_groq(**kwargs)
     if settings.openai_api_key:

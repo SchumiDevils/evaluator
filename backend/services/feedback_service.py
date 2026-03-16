@@ -24,9 +24,27 @@ def _auto_correct(answer: str, question: Question) -> tuple[bool, int, list[Feed
         student_set = _normalize_set(answer)
         correct_set = _normalize_set(correct)
         is_correct = student_set == correct_set
-    else:
-        is_correct = answer.strip().lower() == correct.strip().lower()
 
+        if is_correct:
+            score = points
+            fb = [FeedbackItemSchema(category="Rezultat", message="Răspuns corect!", source="auto")]
+        else:
+            correct_chosen = len(student_set & correct_set)
+            wrong_chosen = len(student_set - correct_set)
+            total_correct = len(correct_set)
+            partial = max(0, correct_chosen - wrong_chosen)
+            score = round(points * partial / total_correct) if total_correct > 0 else 0
+
+            display_correct = ", ".join(s.strip() for s in correct.replace("||", ",").split(",") if s.strip())
+            fb = [FeedbackItemSchema(
+                category="Rezultat",
+                message=f"Răspuns parțial corect ({correct_chosen}/{total_correct} corecte, {wrong_chosen} greșite). Scor: {score}/{points}. Răspunsul corect era: {display_correct}",
+                source="auto",
+            )]
+
+        return is_correct, score, fb
+
+    is_correct = answer.strip().lower() == correct.strip().lower()
     score = points if is_correct else 0
 
     if is_correct:
@@ -81,10 +99,18 @@ async def generate_and_store_feedback(
     elif mode == "ai":
         q_type = question.question_type if question else None
         q_text = question.text if question else None
+        max_points = question.points if question else None
         ai_result = await generate_ai_feedback(
-            answer, rubric=rubric, question_type=q_type, question_text=q_text,
+            answer,
+            rubric=rubric,
+            question_type=q_type,
+            question_text=q_text,
+            max_points=max_points,
         )
         feedback_items = ai_result.feedback
+        score = ai_result.score
+        if score is not None:
+            response.score = score
         response.token_usage = ai_result.token_usage
     else:
         feedback_items = [item.to_schema() for item in generate_feedback(answer)]

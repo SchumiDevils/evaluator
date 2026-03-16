@@ -1,8 +1,242 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { animate, stagger } from 'animejs'
 import Silk from './components/Silk'
 import { ParticleCard, GlobalSpotlight, useMobileDetection } from './components/MagicBento'
 import rubrixLogo from './assets/rubrix-logo.svg'
 import './App.css'
+
+function RubrixDrawTitle() {
+  const svgRef = useRef(null)
+
+  useEffect(() => {
+    if (!svgRef.current) return
+    const elements = svgRef.current.querySelectorAll('.rubrix-letter')
+    if (!elements.length) return
+
+    elements.forEach((el) => {
+      if (el.tagName === 'circle') {
+        const r = parseFloat(el.getAttribute('r'))
+        const circ = 2 * Math.PI * r
+        el.style.strokeDasharray = circ
+        el.style.strokeDashoffset = circ
+        el.style.fill = 'transparent'
+      } else {
+        const length = el.getTotalLength()
+        el.style.strokeDasharray = length
+        el.style.strokeDashoffset = length
+        el.style.fill = 'transparent'
+      }
+    })
+
+    animate(elements, {
+      strokeDashoffset: 0,
+      duration: 1800,
+      ease: 'inOutQuad',
+      delay: stagger(120),
+      onComplete: () => {
+        animate(elements, {
+          stroke: ['url(#rubrixStrokeGrad)', '#e0d4ff'],
+          duration: 800,
+          ease: 'inOutQuad',
+          delay: stagger(60),
+        })
+      }
+    })
+  }, [])
+
+  return (
+    <svg
+      ref={svgRef}
+      viewBox="0 0 230 60"
+      className="rubrix-draw-title"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <defs>
+        <linearGradient id="rubrixStrokeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#a78bfa" />
+          <stop offset="50%" stopColor="#c4b5fd" />
+          <stop offset="100%" stopColor="#8B5CF6" />
+        </linearGradient>
+        <linearGradient id="rubrixFillGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#c4b5fd" />
+          <stop offset="50%" stopColor="#ffffff" />
+          <stop offset="100%" stopColor="#c4b5fd" />
+        </linearGradient>
+        <filter id="rubrixGlow">
+          <feGaussianBlur stdDeviation="2" result="glow" />
+          <feMerge>
+            <feMergeNode in="glow" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+
+      {/* R */}
+      <path className="rubrix-letter" d="M10 50 L10 10 L30 10 Q42 10 42 22 Q42 34 30 34 L10 34 M30 34 L44 50"
+        stroke="url(#rubrixStrokeGrad)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="transparent" filter="url(#rubrixGlow)" />
+
+      {/* u */}
+      <path className="rubrix-letter" d="M58 22 L58 40 Q58 50 68 50 L76 50 Q86 50 86 40 L86 22"
+        stroke="url(#rubrixStrokeGrad)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="transparent" filter="url(#rubrixGlow)" />
+
+      {/* b */}
+      <path className="rubrix-letter" d="M100 8 L100 50 L100 40 Q100 22 115 22 Q130 22 130 36 Q130 50 115 50 L100 50"
+        stroke="url(#rubrixStrokeGrad)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="transparent" filter="url(#rubrixGlow)" />
+
+      {/* r */}
+      <path className="rubrix-letter rubrix-stroke-only" d="M146 50 L146 30 Q146 22 156 22 L162 22"
+        stroke="url(#rubrixStrokeGrad)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="transparent" filter="url(#rubrixGlow)" />
+
+      {/* i */}
+      <path className="rubrix-letter rubrix-stroke-only" d="M178 50 L178 22 M176 11 Q178 7 180 11 Q178 15 176 11"
+        stroke="url(#rubrixStrokeGrad)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="transparent" filter="url(#rubrixGlow)" />
+
+      {/* x */}
+      <path className="rubrix-letter" d="M196 22 L220 50 M220 22 L196 50"
+        stroke="url(#rubrixStrokeGrad)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="transparent" filter="url(#rubrixGlow)" />
+    </svg>
+  )
+}
+
+function AnimeTimer({ timeRemaining, totalDuration, timerExpired }) {
+  const circleRef = useRef(null)
+  const digitsRef = useRef(null)
+  const glowRef = useRef(null)
+  const prevTimeRef = useRef(timeRemaining)
+
+  const radius = 54
+  const circumference = 2 * Math.PI * radius
+  const progress = totalDuration > 0 ? timeRemaining / totalDuration : 0
+  const offset = circumference * (1 - progress)
+
+  const minutes = Math.floor((timeRemaining || 0) / 60)
+  const seconds = (timeRemaining || 0) % 60
+  const mm = String(minutes).padStart(2, '0')
+  const ss = String(seconds).padStart(2, '0')
+
+  const isWarning = timeRemaining <= 300 && timeRemaining > 60
+  const isDanger = timeRemaining <= 60
+
+  useEffect(() => {
+    if (!circleRef.current) return
+    animate(circleRef.current, {
+      strokeDashoffset: offset,
+      duration: 900,
+      ease: 'outQuad',
+    })
+  }, [offset])
+
+  useEffect(() => {
+    if (prevTimeRef.current !== timeRemaining && digitsRef.current) {
+      const chars = digitsRef.current.querySelectorAll('.anime-digit')
+      if (chars.length) {
+        animate(chars, {
+          scale: [1.18, 1],
+          opacity: [0.6, 1],
+          duration: 350,
+          ease: 'outBack(2)',
+          delay: stagger(40),
+        })
+      }
+      prevTimeRef.current = timeRemaining
+    }
+  }, [timeRemaining])
+
+  useEffect(() => {
+    if (isDanger && glowRef.current && !timerExpired) {
+      animate(glowRef.current, {
+        opacity: [0.3, 0.8, 0.3],
+        scale: [1, 1.08, 1],
+        duration: 1200,
+        loop: true,
+        ease: 'inOutSine',
+      })
+    }
+  }, [isDanger, timerExpired])
+
+  const strokeColor = timerExpired
+    ? '#F87171'
+    : isDanger
+    ? '#F87171'
+    : isWarning
+    ? '#FBBF24'
+    : 'url(#timerGradient)'
+
+  const textColor = timerExpired
+    ? 'var(--danger)'
+    : isDanger
+    ? 'var(--danger)'
+    : isWarning
+    ? 'var(--warning)'
+    : 'var(--text-primary)'
+
+  return (
+    <div className={`anime-timer ${timerExpired ? 'expired' : ''} ${isDanger ? 'danger' : ''} ${isWarning ? 'warning' : ''}`}>
+      <div className="anime-timer-ring" ref={glowRef}>
+        <svg viewBox="0 0 120 120" className="anime-timer-svg">
+          <defs>
+            <linearGradient id="timerGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#a78bfa" />
+              <stop offset="50%" stopColor="#8B5CF6" />
+              <stop offset="100%" stopColor="#7C3AED" />
+            </linearGradient>
+            <linearGradient id="timerWarningGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#FDE68A" />
+              <stop offset="100%" stopColor="#FBBF24" />
+            </linearGradient>
+            <linearGradient id="timerDangerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#FCA5A5" />
+              <stop offset="100%" stopColor="#F87171" />
+            </linearGradient>
+            <filter id="timerGlow">
+              <feGaussianBlur stdDeviation="3" result="glow" />
+              <feMerge>
+                <feMergeNode in="glow" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+
+          <circle
+            cx="60" cy="60" r={radius}
+            fill="none"
+            stroke="rgba(139, 92, 246, 0.1)"
+            strokeWidth="6"
+          />
+
+          <circle
+            ref={circleRef}
+            cx="60" cy="60" r={radius}
+            fill="none"
+            stroke={strokeColor}
+            strokeWidth="6"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            transform="rotate(-90 60 60)"
+            filter="url(#timerGlow)"
+            style={{ transition: 'stroke 0.5s ease' }}
+          />
+        </svg>
+
+        <div className="anime-timer-content" ref={digitsRef} style={{ color: textColor }}>
+          {timerExpired ? (
+            <span className="anime-timer-expired">Expirat</span>
+          ) : (
+            <div className="anime-timer-digits">
+              <span className="anime-digit">{mm[0]}</span>
+              <span className="anime-digit">{mm[1]}</span>
+              <span className="anime-timer-sep">:</span>
+              <span className="anime-digit">{ss[0]}</span>
+              <span className="anime-digit">{ss[1]}</span>
+            </div>
+          )}
+          {!timerExpired && <span className="anime-timer-label">rămase</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 const API_PREFIX = '/api/v1'
@@ -118,8 +352,19 @@ function App() {
   const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false)
   const [feedbackMode, setFeedbackMode] = useState('ai')
   const [studentResponses, setStudentResponses] = useState([])
+  const [myResponses, setMyResponses] = useState([])
+  const [myAllResponses, setMyAllResponses] = useState([])
+  const [isMyResponsesLoading, setIsMyResponsesLoading] = useState(false)
   const [detailTab, setDetailTab] = useState('questions')
   const [reevalForm, setReevalForm] = useState({})
+  const [expandedStudents, setExpandedStudents] = useState({})
+
+  // Timer state
+  const [timeRemaining, setTimeRemaining] = useState(null)
+  const [timerExpired, setTimerExpired] = useState(false)
+  const timerRef = useRef(null)
+  const autoSubmitRef = useRef(false)
+
   const dashboardGridRef = useRef(null)
   const isMobile = useMobileDetection()
 
@@ -141,6 +386,56 @@ function App() {
       return () => clearTimeout(timer)
     }
   }, [error, success])
+
+  // Timer countdown
+  useEffect(() => {
+    if (timeRemaining === null || timerExpired) return
+    if (timeRemaining <= 0) {
+      setTimerExpired(true)
+      clearInterval(timerRef.current)
+      if (!autoSubmitRef.current) {
+        autoSubmitRef.current = true
+      }
+      return
+    }
+    timerRef.current = setInterval(() => {
+      setTimeRemaining((prev) => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current)
+          setTimerExpired(true)
+          if (!autoSubmitRef.current) {
+            autoSubmitRef.current = true
+          }
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(timerRef.current)
+  }, [timeRemaining, timerExpired])
+
+  // Auto-submit when timer expires
+  useEffect(() => {
+    if (timerExpired && autoSubmitRef.current && selectedAssessment) {
+      autoSubmitRef.current = false
+      const questions = selectedAssessment.questions || []
+      const hasAnyAnswer = questions.some((q) => answers[q.id]?.trim())
+      if (hasAnyAnswer) {
+        (async () => {
+          for (const q of questions) {
+            if (feedbackResults[q.id]) continue
+            const ans = answers[q.id]
+            if (ans?.trim()) {
+              await handleSubmitAnswer(q.id, ans)
+            }
+          }
+          setSuccess('Timpul a expirat! Răspunsurile au fost trimise automat.')
+        })()
+      } else {
+        setError('Timpul a expirat! Nu ai completat niciun răspuns.')
+      }
+    }
+  }, [timerExpired])
 
   const fetchProfile = useCallback(async () => {
     if (!token) {
@@ -419,20 +714,93 @@ function App() {
     }
   }
 
-  const handleOpenAssessment = (assessment) => {
+  const handleOpenAssessment = async (assessment) => {
     setSelectedAssessment(assessment)
     setAnswers({})
     setFeedbackResults({})
+    setMyResponses([])
     setDetailTab('questions')
     setStudentResponses([])
     setReevalForm({})
+    setExpandedStudents({})
     setView('detail')
-    if (user?.role === 'professor' && assessment.author_id === user?.id) {
-      fetchStudentResponses(assessment.id)
+
+    const isOwner = user?.role === 'professor' && assessment.author_id === user?.id
+
+    if (!isOwner && assessment.duration) {
+      try {
+        const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/${assessment.id}/start`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` }
+        })
+        if (res.ok) {
+          const { seconds_remaining } = await res.json()
+          if (seconds_remaining <= 0) {
+            setTimeRemaining(0)
+            setTimerExpired(true)
+            autoSubmitRef.current = false
+          } else {
+            setTimeRemaining(seconds_remaining)
+            setTimerExpired(false)
+            autoSubmitRef.current = false
+          }
+        } else {
+          setTimeRemaining(assessment.duration * 60)
+          setTimerExpired(false)
+          autoSubmitRef.current = false
+        }
+      } catch {
+        setTimeRemaining(assessment.duration * 60)
+        setTimerExpired(false)
+        autoSubmitRef.current = false
+      }
+    } else {
+      setTimeRemaining(null)
+      setTimerExpired(false)
+    }
+
+    if (isOwner) {
+      await fetchStudentResponses(assessment.id)
+    } else {
+      const loadedResponses = await fetchMyResponses(assessment.id)
+      if (loadedResponses?.length) {
+        const latestByQuestion = loadedResponses.reduce((acc, response) => {
+          if (!response.question_id) return acc
+          if (!acc[response.question_id]) {
+            acc[response.question_id] = response
+          }
+          return acc
+        }, {})
+
+        const existingAnswers = {}
+        const existingFeedback = {}
+        for (const [questionId, response] of Object.entries(latestByQuestion)) {
+          existingAnswers[questionId] = response.answer_text || ''
+          existingFeedback[questionId] = {
+            response_id: response.id,
+            score: response.score,
+            is_correct: response.is_correct,
+            feedback: response.feedback || [],
+          }
+        }
+
+        setAnswers(existingAnswers)
+        setFeedbackResults(existingFeedback)
+
+        const totalQuestions = (assessment.questions || []).length
+        const submittedCount = Object.keys(existingFeedback).length
+        if (submittedCount >= totalQuestions && totalQuestions > 0) {
+          clearInterval(timerRef.current)
+          setTimeRemaining(null)
+        }
+      }
     }
   }
 
   const handleSubmitAnswer = async (questionId, answerText) => {
+    if (feedbackResults[questionId]) {
+      return
+    }
     if (!answerText?.trim()) {
       setError('Introdu un răspuns.')
       return
@@ -464,6 +832,9 @@ function App() {
       const data = await res.json()
       setFeedbackResults((prev) => ({ ...prev, [questionId]: data }))
       fetchAssessments()
+      if (selectedAssessment && user?.role === 'student') {
+        await fetchMyResponses(selectedAssessment.id)
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -475,13 +846,28 @@ function App() {
     e.preventDefault()
     const questions = selectedAssessment.questions || []
     if (questions.length === 0) return
-    
-    for (const q of questions) {
+
+    const unanswered = questions.filter((q) => !answers[q.id]?.trim())
+    if (unanswered.length > 0) {
+      setError(`Trebuie să răspunzi la toate întrebările înainte de a trimite. Mai ai ${unanswered.length} întrebare${unanswered.length > 1 ? 'i' : ''} fără răspuns.`)
+      return
+    }
+
+    const questionsToSubmit = questions.filter((q) => !feedbackResults[q.id])
+    if (questionsToSubmit.length === 0) {
+      setSuccess('Ai trimis deja toate răspunsurile pentru această evaluare.')
+      return
+    }
+
+    for (const q of questionsToSubmit) {
       const ans = answers[q.id]
       if (ans?.trim()) {
         await handleSubmitAnswer(q.id, ans)
       }
     }
+    // Stop timer after successful submission
+    clearInterval(timerRef.current)
+    setTimeRemaining(null)
     setSuccess('Toate răspunsurile au fost trimise!')
   }
 
@@ -491,11 +877,56 @@ function App() {
         headers: { Authorization: `Bearer ${token}` }
       })
       if (res.ok) {
-        setStudentResponses(await res.json())
+        const data = await res.json()
+        setStudentResponses(data)
+        return data
       }
     } catch {
       setError('Nu s-au putut încărca răspunsurile studenților.')
     }
+    return []
+  }
+
+  const fetchMyResponses = async (evaluationId) => {
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/${evaluationId}/my-responses`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setMyResponses(data)
+        return data
+      }
+    } catch {
+      setError('Nu s-au putut încărca răspunsurile tale anterioare.')
+    }
+    return []
+  }
+
+  const fetchMyAllResponses = async () => {
+    setIsMyResponsesLoading(true)
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/my-responses`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setMyAllResponses(data)
+        return data
+      }
+      const err = await res.json().catch(() => ({}))
+      throw new Error(err.detail ?? 'Nu s-au putut încărca răspunsurile tale.')
+    } catch (err) {
+      setError(err.message || 'Nu s-au putut încărca răspunsurile tale.')
+      return []
+    } finally {
+      setIsMyResponsesLoading(false)
+    }
+  }
+
+  const handleOpenMyResponses = async () => {
+    await fetchMyAllResponses()
+    setView('my-responses')
   }
 
   const handleReevaluate = async (responseId) => {
@@ -526,6 +957,16 @@ function App() {
     }
   }
 
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+  }
+
+  const toggleStudent = (userId) => {
+    setExpandedStudents((prev) => ({ ...prev, [userId]: !prev[userId] }))
+  }
+
   const filteredAssessments = assessments.filter((a) => {
     const matchesFilter = filter === 'all' || a.status === filter
     const matchesSearch =
@@ -549,7 +990,7 @@ function App() {
             <div className="logo-icon">
               <Icons.Logo />
             </div>
-            <h1>Rubrix</h1>
+            <RubrixDrawTitle />
           </div>
           <div className="auth-card">
             <div className="auth-tabs">
@@ -645,6 +1086,15 @@ function App() {
             <span>New Assessment</span>
           </button>
         )}
+        {user?.role === 'student' && (
+          <button
+            className={view === 'my-responses' ? 'active' : ''}
+            onClick={handleOpenMyResponses}
+          >
+            <Icons.People />
+            <span>Răspunsurile mele</span>
+          </button>
+        )}
         <button className="icon-only" onClick={handleLogout} title="Logout">
           <Icons.Logout />
         </button>
@@ -664,6 +1114,9 @@ function App() {
   if (view === 'detail' && selectedAssessment) {
     const isOwner = user?.role === 'professor' && selectedAssessment.author_id === user?.id
     const canAnswer = !isOwner
+    const totalQuestions = (selectedAssessment.questions || []).length
+    const submittedQuestionsCount = Object.keys(feedbackResults).length
+    const allQuestionsSubmitted = totalQuestions > 0 && submittedQuestionsCount >= totalQuestions
 
     const groupedByStudent = studentResponses.reduce((acc, r) => {
       const key = r.user_id || 'unknown'
@@ -743,6 +1196,15 @@ function App() {
                   <h3>Descriere</h3>
                   <p>{selectedAssessment.description || 'Nicio descriere disponibilă.'}</p>
                 </ParticleCard>
+                {canAnswer && timeRemaining !== null && (
+                  <ParticleCard className="info-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+                    <AnimeTimer
+                      timeRemaining={timeRemaining}
+                      totalDuration={selectedAssessment.duration * 60}
+                      timerExpired={timerExpired}
+                    />
+                  </ParticleCard>
+                )}
                 <ParticleCard className="info-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
                   <h3>Detalii</h3>
                   <div className="info-row">
@@ -757,6 +1219,12 @@ function App() {
                     <span><Icons.Document /> Exerciții:</span>
                     <strong>{(selectedAssessment.questions || []).length}</strong>
                   </div>
+                  {canAnswer && (
+                    <div className="info-row">
+                      <span><Icons.Send /> Trimise:</span>
+                      <strong>{submittedQuestionsCount}/{totalQuestions}</strong>
+                    </div>
+                  )}
                 </ParticleCard>
               </div>
 
@@ -767,7 +1235,19 @@ function App() {
                   </div>
                 ) : canAnswer ? (
                   <form onSubmit={handleSubmitAllAnswers}>
-                    {selectedAssessment.questions.map((q, idx) => (
+                    {allQuestionsSubmitted && (
+                      <div className="submitted-info-banner">
+                        Ai trimis deja toate răspunsurile. Mai jos poți vedea răspunsurile tale și orice reevaluare făcută de profesor.
+                      </div>
+                    )}
+                    {timerExpired && Object.keys(feedbackResults).length === 0 && (
+                      <div className="timer-expired-banner">
+                        Timpul a expirat! Nu mai poți modifica răspunsurile.
+                      </div>
+                    )}
+                    {selectedAssessment.questions.map((q, idx) => {
+                      const isDisabled = timerExpired || !!feedbackResults[q.id]
+                      return (
                       <ParticleCard className="question-card magic-bento-card magic-bento-card--border-glow" key={q.id} disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
                         <div className="question-header">
                           <span className="question-number">Exercițiul {idx + 1}</span>
@@ -778,12 +1258,13 @@ function App() {
                         {(q.question_type === 'multiple_choice') && q.options && (
                           <div className="question-options">
                             {q.options.map((opt, oi) => (
-                              <label key={oi} className="option-label">
+                              <label key={oi} className={`option-label ${isDisabled ? 'disabled' : ''}`}>
                                 <input
                                   type="radio"
                                   name={`q-${q.id}`}
                                   value={opt}
                                   checked={answers[q.id] === opt}
+                                  disabled={isDisabled}
                                   onChange={() => setAnswers((p) => ({ ...p, [q.id]: opt }))}
                                 />
                                 <span>{opt}</span>
@@ -798,10 +1279,11 @@ function App() {
                               const selected = (answers[q.id] || '').split('||')
                               const isChecked = selected.includes(opt)
                               return (
-                                <label key={oi} className="option-label">
+                                <label key={oi} className={`option-label ${isDisabled ? 'disabled' : ''}`}>
                                   <input
                                     type="checkbox"
                                     checked={isChecked}
+                                    disabled={isDisabled}
                                     onChange={() => {
                                       const next = isChecked
                                         ? selected.filter((s) => s !== opt)
@@ -822,6 +1304,7 @@ function App() {
                             className="question-input"
                             placeholder="Răspunsul tău..."
                             value={answers[q.id] || ''}
+                            disabled={isDisabled}
                             onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
                           />
                         )}
@@ -832,16 +1315,21 @@ function App() {
                             placeholder="Scrie răspunsul tău aici..."
                             rows={5}
                             value={answers[q.id] || ''}
+                            disabled={isDisabled}
                             onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
                           />
                         )}
 
+                        {!answers[q.id]?.trim() && !feedbackResults[q.id] && !timerExpired && (
+                          <p className="unanswered-hint">* Răspuns obligatoriu</p>
+                        )}
+
                         {feedbackResults[q.id] && (
-                          <div className={`question-feedback ${feedbackResults[q.id].is_correct === true ? 'correct' : feedbackResults[q.id].is_correct === false ? 'incorrect' : ''}`}>
+                          <div className={`question-feedback ${feedbackResults[q.id].is_correct === true ? 'correct' : feedbackResults[q.id].score > 0 && !feedbackResults[q.id].is_correct ? 'partial' : feedbackResults[q.id].is_correct === false ? 'incorrect' : ''}`}>
                             {feedbackResults[q.id].score != null && (
                               <div className="auto-score">
-                                <span className={`score-badge ${feedbackResults[q.id].is_correct ? 'correct' : 'incorrect'}`}>
-                                  {feedbackResults[q.id].is_correct ? '✓' : '✗'} {feedbackResults[q.id].score}/{q.points} puncte
+                                <span className={`score-badge ${feedbackResults[q.id].is_correct ? 'correct' : feedbackResults[q.id].score > 0 ? 'partial' : 'incorrect'}`}>
+                                  {feedbackResults[q.id].is_correct ? '✓' : feedbackResults[q.id].score > 0 ? '~' : '✗'} {feedbackResults[q.id].score}/{q.points} puncte
                                 </span>
                               </div>
                             )}
@@ -860,7 +1348,9 @@ function App() {
                           </div>
                         )}
                       </ParticleCard>
-                    ))}
+                      )
+                    })}
+                    {!timerExpired && !allQuestionsSubmitted && (
                     <div className="submit-bar">
                       <div className="feedback-mode-selector">
                         <label>Mod feedback:</label>
@@ -872,7 +1362,7 @@ function App() {
                       <button 
                         type="submit" 
                         className="btn-primary submit-all-btn"
-                        disabled={isGeneratingFeedback}
+                        disabled={isGeneratingFeedback || timerExpired}
                       >
                         {isGeneratingFeedback ? 'Se generează feedback...' : (
                           <>
@@ -882,6 +1372,7 @@ function App() {
                         )}
                       </button>
                     </div>
+                    )}
                   </form>
                 ) : (
                   <div>
@@ -918,13 +1409,27 @@ function App() {
                   <p>Niciun student nu a răspuns încă la această evaluare.</p>
                 </div>
               ) : (
-                Object.entries(groupedByStudent).map(([userId, { name, responses }]) => (
+                Object.entries(groupedByStudent).map(([userId, { name, responses }]) => {
+                  const isExpanded = !!expandedStudents[userId]
+                  const totalScore = responses.reduce((sum, r) => sum + (r.score ?? 0), 0)
+                  const maxScore = responses.reduce((sum, r) => {
+                    const q = questionsMap[r.question_id]
+                    return sum + (q?.points ?? 0)
+                  }, 0)
+                  return (
                   <ParticleCard className="student-response-card magic-bento-card magic-bento-card--border-glow" key={userId} disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
-                    <div className="student-response-header">
+                    <div className="student-response-header collapsible" onClick={() => toggleStudent(userId)}>
                       <Icons.People />
                       <h3>{name}</h3>
                       <span className="response-count">{responses.length} răspunsuri</span>
+                      {maxScore > 0 && (
+                        <span className="student-total-score">{totalScore}/{maxScore} puncte</span>
+                      )}
+                      <span className={`collapse-icon ${isExpanded ? 'expanded' : ''}`}>
+                        <Icons.Arrow />
+                      </span>
                     </div>
+                    {isExpanded && (
                     <div className="student-answers-list">
                       {responses.map((r) => {
                         const q = questionsMap[r.question_id]
@@ -990,9 +1495,139 @@ function App() {
                         )
                       })}
                     </div>
+                    )}
                   </ParticleCard>
-                ))
+                  )
+                })
               )}
+            </div>
+          )}
+        </main>
+      </div>
+    )
+  }
+
+  if (view === 'my-responses' && user?.role === 'student') {
+    const groupedMyResponses = myAllResponses.reduce((acc, response) => {
+      const key = response.evaluation_id || 'unknown'
+      if (!acc[key]) {
+        acc[key] = {
+          evaluationTitle: response.evaluation_title || 'Evaluare necunoscută',
+          responses: []
+        }
+      }
+      acc[key].responses.push(response)
+      return acc
+    }, {})
+
+    const feedbackSourceLabel = (source) => {
+      if (source === 'auto') return 'Auto'
+      if (source === 'professor') return 'Profesor'
+      if (source?.startsWith('ai:')) return 'AI'
+      return 'Reguli'
+    }
+
+    const feedbackSourceClass = (source) => {
+      if (source === 'auto') return 'auto'
+      if (source === 'professor') return 'professor'
+      if (source?.startsWith('ai:')) return 'ai'
+      return 'rule'
+    }
+
+    const toggleMyEval = (evalId) => {
+      setExpandedStudents((prev) => ({ ...prev, [evalId]: !prev[evalId] }))
+    }
+
+    return (
+      <div className="app-layout">
+        <Navbar />
+        <Notifications />
+        <main className="main-content">
+          <div className="page-header">
+            <div>
+              <h1>Răspunsurile mele</h1>
+              <p>Vezi toate răspunsurile trimise și feedback-ul primit (inclusiv reevaluările profesorului).</p>
+            </div>
+            <button className="btn-secondary" onClick={() => setView('dashboard')}>
+              <Icons.Back />
+              Înapoi la dashboard
+            </button>
+          </div>
+
+          {isMyResponsesLoading ? (
+            <p className="loading">Se încarcă răspunsurile tale...</p>
+          ) : Object.keys(groupedMyResponses).length === 0 ? (
+            <div className="empty-state">
+              <Icons.Document />
+              <p>Nu ai trimis încă niciun răspuns.</p>
+            </div>
+          ) : (
+            <div className="responses-view">
+              {Object.entries(groupedMyResponses).map(([evaluationId, group]) => {
+                const isExpanded = !!expandedStudents[evaluationId]
+                const totalScore = group.responses.reduce((sum, r) => sum + (r.score ?? 0), 0)
+                const maxScore = group.responses.reduce((sum, r) => sum + (r.question_points ?? 0), 0)
+                return (
+                <ParticleCard
+                  className="student-response-card magic-bento-card magic-bento-card--border-glow"
+                  key={evaluationId}
+                  disableAnimations={isMobile}
+                  particleCount={6}
+                  glowColor="132, 0, 255"
+                  enableTilt={false}
+                  clickEffect
+                >
+                  <div className="student-response-header collapsible" onClick={() => toggleMyEval(evaluationId)}>
+                    <Icons.Document />
+                    <h3>{group.evaluationTitle}</h3>
+                    <span className="response-count">{group.responses.length} răspunsuri</span>
+                    {maxScore > 0 && (
+                      <span className="student-total-score">{totalScore}/{maxScore} puncte</span>
+                    )}
+                    <span className={`collapse-icon ${isExpanded ? 'expanded' : ''}`}>
+                      <Icons.Arrow />
+                    </span>
+                  </div>
+                  {isExpanded && (
+                  <div className="student-answers-list">
+                    {group.responses.map((r, idx) => (
+                      <div className="student-answer-item" key={r.id}>
+                        <div className="sa-question">
+                          <span className="sa-label">Ex. {idx + 1}</span>
+                          <span className="sa-question-text">{r.question_text || 'Întrebare necunoscută'}</span>
+                        </div>
+                        <div className="sa-answer">
+                          <span className="sa-label">Răspuns:</span>
+                          <p>{r.answer_text}</p>
+                        </div>
+                        {r.score != null && (
+                          <div className="sa-score">
+                            Scor: <strong>{r.score}/{r.question_points || '?'}</strong>
+                          </div>
+                        )}
+                        {r.feedback && r.feedback.length > 0 && (
+                          <div className="sa-feedback">
+                            <span className="sa-label">Feedback:</span>
+                            <ul className="feedback-list">
+                              {r.feedback.map((fb, fi) => (
+                                <li key={fi}>
+                                  <span className="badge">{fb.category}</span>
+                                  <span className={`badge source-badge ${feedbackSourceClass(fb.source)}`}>
+                                    {feedbackSourceLabel(fb.source)}
+                                  </span>
+                                  <p>{fb.message}</p>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  )}
+                </ParticleCard>
+                )
+              })}
             </div>
           )}
         </main>
@@ -1253,12 +1888,23 @@ function App() {
                 <Icons.Document />
               </div>
             </ParticleCard>
+            <div className="student-stat-clickable" onClick={handleOpenMyResponses} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && handleOpenMyResponses()}>
+              <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow student-stat-wide" disableAnimations={isMobile} particleCount={10} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+                <div className="stat-info">
+                  <span className="stat-label">RĂSPUNSURILE TALE</span>
+                  <span className="stat-value">{stats.responses}</span>
+                </div>
+                <div className="stat-icon green">
+                  <Icons.Trend />
+                </div>
+              </ParticleCard>
+            </div>
             <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow student-stat-wide" disableAnimations={isMobile} particleCount={10} glowColor="132, 0, 255" enableTilt={false} clickEffect>
               <div className="stat-info">
-                <span className="stat-label">RĂSPUNSURILE TALE</span>
-                <span className="stat-value">{stats.responses}</span>
+                <span className="stat-label">SCOR MEDIU</span>
+                <span className="stat-value">{stats.avgScore}%</span>
               </div>
-              <div className="stat-icon green">
+              <div className="stat-icon pink">
                 <Icons.Trend />
               </div>
             </ParticleCard>
