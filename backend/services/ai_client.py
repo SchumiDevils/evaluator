@@ -42,24 +42,57 @@ def _parse_text_to_feedback(text: str, source: str) -> list[FeedbackItemSchema]:
     return items
 
 
-def _build_prompts(answer: str, rubric: Optional[Iterable[str]] = None) -> tuple[str, str]:
+def _build_prompts(
+    answer: str,
+    rubric: Optional[Iterable[str]] = None,
+    question_type: Optional[str] = None,
+    question_text: Optional[str] = None,
+) -> tuple[str, str]:
     rubric_prompt = (
-        "\n".join(f"- {criterion}" for criterion in rubric) if rubric else "- Calitatea răspunsului.\n- Claritate.\n- Exemple."
+        "\n".join(f"- {criterion}" for criterion in rubric)
+        if rubric
+        else "- Calitatea răspunsului.\n- Claritate.\n- Exemple."
     )
 
-    system_prompt = (
-        "Ești un profesor care oferă feedback structurat și concis pentru răspunsurile studenților. "
-        "Oferă maximum 4 observații, fiecare sub forma 'Categorie: mesaj'. "
-        "Scrie în limba română."
-    )
+    question_ctx = f"\nÎntrebarea: {question_text}\n" if question_text else ""
 
-    user_prompt = (
-        "Răspuns student:\n"
-        f"{answer}\n\n"
-        "Evaluează folosind această rubrică:\n"
-        f"{rubric_prompt}\n\n"
-        "Returnează lista de observații, câte una pe linie."
-    )
+    if question_type in ("multiple_choice", "checkboxes"):
+        system_prompt = (
+            "Ești un profesor care oferă feedback scurt pentru un exercițiu de tip alegere. "
+            "Explică de ce răspunsul ales este corect sau greșit în maximum 2 observații. "
+            "Nu da exemple detaliate. Format: 'Categorie: mesaj', fiecare pe o linie. "
+            "Scrie în limba română."
+        )
+        user_prompt = (
+            f"{question_ctx}"
+            f"Răspuns student: {answer}\n\n"
+            "Oferă feedback scurt despre alegerea făcută."
+        )
+    elif question_type == "short_answer":
+        system_prompt = (
+            "Ești un profesor care oferă feedback concis pentru răspunsuri scurte. "
+            "Oferă maximum 2-3 observații, fiecare sub forma 'Categorie: mesaj'. "
+            "Concentrează-te pe corectitudine și completitudine. Scrie în limba română."
+        )
+        user_prompt = (
+            f"{question_ctx}"
+            f"Răspuns student:\n{answer}\n\n"
+            "Evaluează răspunsul scurt al studentului.\n"
+            "Returnează lista de observații, câte una pe linie."
+        )
+    else:
+        system_prompt = (
+            "Ești un profesor care oferă feedback structurat și concis pentru răspunsurile studenților. "
+            "Oferă maximum 4 observații, fiecare sub forma 'Categorie: mesaj'. "
+            "Scrie în limba română."
+        )
+        user_prompt = (
+            f"{question_ctx}"
+            f"Răspuns student:\n{answer}\n\n"
+            "Evaluează folosind această rubrică:\n"
+            f"{rubric_prompt}\n\n"
+            "Returnează lista de observații, câte una pe linie."
+        )
 
     return system_prompt, user_prompt
 
@@ -71,8 +104,10 @@ async def _generate_with_openai_compatible(
     source: str,
     rubric: Optional[Iterable[str]] = None,
     base_url: Optional[str] = None,
+    question_type: Optional[str] = None,
+    question_text: Optional[str] = None,
 ) -> AIResult:
-    system_prompt, user_prompt = _build_prompts(answer, rubric)
+    system_prompt, user_prompt = _build_prompts(answer, rubric, question_type, question_text)
 
     client = AsyncOpenAI(api_key=api_key, base_url=base_url)
     response = await client.chat.completions.create(
@@ -86,7 +121,12 @@ async def _generate_with_openai_compatible(
     return AIResult(feedback=_parse_text_to_feedback(text_output, source=source), token_usage=total_tokens)
 
 
-async def _generate_with_groq(answer: str, rubric: Optional[Iterable[str]] = None) -> AIResult:
+async def _generate_with_groq(
+    answer: str,
+    rubric: Optional[Iterable[str]] = None,
+    question_type: Optional[str] = None,
+    question_text: Optional[str] = None,
+) -> AIResult:
     if not settings.groq_api_key:
         raise RuntimeError("Groq API key is not configured")
 
@@ -97,10 +137,17 @@ async def _generate_with_groq(answer: str, rubric: Optional[Iterable[str]] = Non
         source="ai:groq",
         rubric=rubric,
         base_url="https://api.groq.com/openai/v1",
+        question_type=question_type,
+        question_text=question_text,
     )
 
 
-async def _generate_with_openai(answer: str, rubric: Optional[Iterable[str]] = None) -> AIResult:
+async def _generate_with_openai(
+    answer: str,
+    rubric: Optional[Iterable[str]] = None,
+    question_type: Optional[str] = None,
+    question_text: Optional[str] = None,
+) -> AIResult:
     if not settings.openai_api_key:
         raise RuntimeError("OpenAI API key is not configured")
 
@@ -110,15 +157,22 @@ async def _generate_with_openai(answer: str, rubric: Optional[Iterable[str]] = N
         answer=answer,
         source="ai:openai",
         rubric=rubric,
+        question_type=question_type,
+        question_text=question_text,
     )
 
 
-async def _generate_with_huggingface(answer: str, rubric: Optional[Iterable[str]] = None) -> AIResult:
+async def _generate_with_huggingface(
+    answer: str,
+    rubric: Optional[Iterable[str]] = None,
+    question_type: Optional[str] = None,
+    question_text: Optional[str] = None,
+) -> AIResult:
     if not settings.huggingface_api_token or not settings.huggingface_model:
         raise RuntimeError("Hugging Face configuration missing")
 
     url = f"https://api-inference.huggingface.co/models/{settings.huggingface_model}"
-    system_prompt, user_prompt = _build_prompts(answer, rubric)
+    system_prompt, user_prompt = _build_prompts(answer, rubric, question_type, question_text)
     prompt = f"{system_prompt}\n\n{user_prompt}"
 
     headers = {
@@ -140,11 +194,17 @@ async def _generate_with_huggingface(answer: str, rubric: Optional[Iterable[str]
     return AIResult(feedback=_parse_text_to_feedback(text, source="ai:huggingface"))
 
 
-async def generate_ai_feedback(answer: str, rubric: Optional[Iterable[str]] = None) -> AIResult:
+async def generate_ai_feedback(
+    answer: str,
+    rubric: Optional[Iterable[str]] = None,
+    question_type: Optional[str] = None,
+    question_text: Optional[str] = None,
+) -> AIResult:
+    kwargs = dict(answer=answer, rubric=rubric, question_type=question_type, question_text=question_text)
     if settings.groq_api_key:
-        return await _generate_with_groq(answer, rubric=rubric)
+        return await _generate_with_groq(**kwargs)
     if settings.openai_api_key:
-        return await _generate_with_openai(answer, rubric=rubric)
+        return await _generate_with_openai(**kwargs)
     if settings.huggingface_api_token and settings.huggingface_model:
-        return await _generate_with_huggingface(answer, rubric=rubric)
+        return await _generate_with_huggingface(**kwargs)
     raise RuntimeError("No AI provider configured. Set Groq, OpenAI, or Hugging Face credentials.")

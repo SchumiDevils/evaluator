@@ -14,11 +14,14 @@ class Response(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     answer_text: Mapped[str] = mapped_column(Text, nullable=False)
     evaluation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("evaluations.id", ondelete="SET NULL"))
+    question_id: Mapped[Optional[int]] = mapped_column(ForeignKey("questions.id", ondelete="SET NULL"))
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     token_usage: Mapped[Optional[int]] = mapped_column(Integer)
     mode: Mapped[str] = mapped_column(String(32), default="rule_based")
 
     evaluation: Mapped[Optional["Evaluation"]] = relationship(back_populates="responses")
+    question: Mapped[Optional["Question"]] = relationship()
     author: Mapped[Optional["User"]] = relationship(back_populates="responses")
     feedback_items: Mapped[List["Feedback"]] = relationship(
         back_populates="response", cascade="all, delete-orphan"
@@ -27,6 +30,7 @@ class Response(TimestampMixin, Base):
 
 from .evaluation import Evaluation  # noqa: E402
 from .feedback import Feedback  # noqa: E402
+from .question import Question  # noqa: E402
 from .user import User  # noqa: E402
 
 

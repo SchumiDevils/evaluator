@@ -707,6 +707,7 @@
    ============================================ */
 .assessment-form {
   max-width: 800px;
+  margin: 0 auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -873,11 +874,12 @@
 }
 
 .info-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: #060010;
+  border: 1px solid #392e4e;
+  border-radius: 20px;
   padding: 1.5rem;
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
+  transition: all 0.3s ease;
 }
 
 .info-card h3 {
@@ -1241,11 +1243,12 @@
 }
 
 .question-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: #060010;
+  border: 1px solid #392e4e;
+  border-radius: 20px;
   padding: 1.5rem;
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
+  transition: all 0.3s ease;
 }
 
 .question-header {
@@ -1422,7 +1425,7 @@
 .feedback-mode-selector label {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #64748b;
+  color: var(--text-secondary);
   white-space: nowrap;
   margin: 0;
 }
@@ -1458,6 +1461,314 @@
 }
 
 .source-badge.rule {
-  background: #e2e8f0;
-  color: #475569;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Student dashboard */
+.student-welcome-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+@media (max-width: 640px) {
+  .student-welcome-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+.btn-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-start:hover {
+  background: var(--primary-dark);
+}
+
+.btn-start svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Detail tabs */
+.detail-tabs {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+
+.detail-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.detail-tabs button:hover {
+  color: var(--text-primary);
+}
+
+.detail-tabs button.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.detail-tabs button svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Auto-correct score */
+.auto-score {
+  margin-bottom: 0.75rem;
+}
+
+.score-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.score-badge.correct {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.score-badge.incorrect {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.question-feedback.correct {
+  border-left: 3px solid var(--success);
+  padding-left: 1rem;
+}
+
+.question-feedback.incorrect {
+  border-left: 3px solid var(--danger);
+  padding-left: 1rem;
+}
+
+.source-badge.auto {
+  background: linear-gradient(135deg, var(--success), #059669);
+  color: white;
+}
+
+.source-badge.professor {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: white;
+}
+
+/* Professor preview of questions (read-only) */
+.question-options.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.option-preview {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  padding: 0.25rem 0;
+}
+
+.correct-answer-preview {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--success);
+  padding: 0.5rem 0.75rem;
+  background: var(--success-light);
+  border-radius: var(--radius-sm);
+}
+
+/* Student responses view */
+.responses-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.student-response-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 0;
+  overflow: hidden;
+}
+
+.student-response-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.student-response-header svg {
+  width: 22px;
+  height: 22px;
+  color: var(--primary);
+}
+
+.student-response-header h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.response-count {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.65rem;
+  background: var(--primary-light);
+  color: var(--primary);
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.student-answers-list {
+  padding: 0;
+}
+
+.student-answer-item {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.student-answer-item:last-child {
+  border-bottom: none;
+}
+
+.sa-question {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.sa-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.sa-question-text {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.sa-answer {
+  margin-bottom: 0.5rem;
+}
+
+.sa-answer p {
+  margin: 0.25rem 0 0;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(139, 92, 246, 0.06);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(139, 92, 246, 0.1);
+}
+
+.sa-score {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.sa-score strong {
+  color: var(--primary);
+}
+
+.sa-feedback {
+  margin-bottom: 0.75rem;
+}
+
+.sa-feedback .feedback-list {
+  margin-top: 0.35rem;
+}
+
+.sa-reevaluate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border);
+}
+
+.reeval-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.reeval-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.reeval-row input[type="number"] {
+  width: 80px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.reeval-feedback-label {
+  flex: 1;
+}
+
+.reeval-row input[type="text"] {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+}
+
+.btn-sm {
+  padding: 0.35rem 0.85rem;
+  font-size: 0.8rem;
+  align-self: flex-start;
 }

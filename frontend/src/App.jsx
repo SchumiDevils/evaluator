@@ -117,6 +117,9 @@ function App() {
   const [feedbackResults, setFeedbackResults] = useState({})
   const [isGeneratingFeedback, setIsGeneratingFeedback] = useState(false)
   const [feedbackMode, setFeedbackMode] = useState('ai')
+  const [studentResponses, setStudentResponses] = useState([])
+  const [detailTab, setDetailTab] = useState('questions')
+  const [reevalForm, setReevalForm] = useState({})
   const dashboardGridRef = useRef(null)
   const isMobile = useMobileDetection()
 
@@ -420,7 +423,13 @@ function App() {
     setSelectedAssessment(assessment)
     setAnswers({})
     setFeedbackResults({})
+    setDetailTab('questions')
+    setStudentResponses([])
+    setReevalForm({})
     setView('detail')
+    if (user?.role === 'professor' && assessment.author_id === user?.id) {
+      fetchStudentResponses(assessment.id)
+    }
   }
 
   const handleSubmitAnswer = async (questionId, answerText) => {
@@ -442,6 +451,7 @@ function App() {
         body: JSON.stringify({
           answer: answerText,
           evaluation_id: selectedAssessment.id,
+          question_id: questionId,
           mode: feedbackMode
         })
       })
@@ -473,6 +483,47 @@ function App() {
       }
     }
     setSuccess('Toate răspunsurile au fost trimise!')
+  }
+
+  const fetchStudentResponses = async (evaluationId) => {
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/${evaluationId}/responses`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        setStudentResponses(await res.json())
+      }
+    } catch {
+      setError('Nu s-au putut încărca răspunsurile studenților.')
+    }
+  }
+
+  const handleReevaluate = async (responseId) => {
+    const form = reevalForm[responseId]
+    if (!form?.score && !form?.feedback_message) return
+
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/responses/${responseId}/feedback`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          score: form.score != null ? Number(form.score) : undefined,
+          feedback_message: form.feedback_message || undefined,
+        })
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail ?? 'Reevaluarea a eșuat.')
+      }
+      setSuccess('Reevaluare salvată!')
+      setReevalForm((p) => ({ ...p, [responseId]: {} }))
+      if (selectedAssessment) fetchStudentResponses(selectedAssessment.id)
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   const filteredAssessments = assessments.filter((a) => {
@@ -611,6 +662,34 @@ function App() {
 
   // Assessment Detail view
   if (view === 'detail' && selectedAssessment) {
+    const isOwner = user?.role === 'professor' && selectedAssessment.author_id === user?.id
+    const canAnswer = !isOwner
+
+    const groupedByStudent = studentResponses.reduce((acc, r) => {
+      const key = r.user_id || 'unknown'
+      if (!acc[key]) acc[key] = { name: r.user_name || 'Student necunoscut', responses: [] }
+      acc[key].responses.push(r)
+      return acc
+    }, {})
+
+    const questionsMap = (selectedAssessment.questions || []).reduce((m, q) => {
+      m[q.id] = q
+      return m
+    }, {})
+
+    const feedbackSourceLabel = (source) => {
+      if (source === 'auto') return 'Auto'
+      if (source === 'professor') return 'Profesor'
+      if (source?.startsWith('ai:')) return 'AI'
+      return 'Reguli'
+    }
+    const feedbackSourceClass = (source) => {
+      if (source === 'auto') return 'auto'
+      if (source === 'professor') return 'professor'
+      if (source?.startsWith('ai:')) return 'ai'
+      return 'rule'
+    }
+
     return (
       <div className="app-layout">
         <Navbar />
@@ -629,7 +708,7 @@ function App() {
               <span className={`status-badge ${selectedAssessment.status}`}>
                 {selectedAssessment.status}
               </span>
-              {user?.role === 'professor' && (
+              {isOwner && (
                 <>
                   <button className="btn-secondary" onClick={() => handleEditAssessment(selectedAssessment)}>
                     <Icons.Edit />
@@ -644,148 +723,278 @@ function App() {
             </div>
           </div>
 
-          <div className="detail-layout">
-            <div className="detail-sidebar">
-              <div className="info-card">
-                <h3>Descriere</h3>
-                <p>{selectedAssessment.description || 'Nicio descriere disponibilă.'}</p>
-              </div>
-              <div className="info-card">
-                <h3>Detalii</h3>
-                <div className="info-row">
-                  <span><Icons.Clock /> Durată:</span>
-                  <strong>{selectedAssessment.duration} minute</strong>
-                </div>
-                <div className="info-row">
-                  <span><Icons.People /> Răspunsuri:</span>
-                  <strong>{selectedAssessment.response_count}</strong>
-                </div>
-                <div className="info-row">
-                  <span><Icons.Document /> Exerciții:</span>
-                  <strong>{(selectedAssessment.questions || []).length}</strong>
-                </div>
-              </div>
+          {isOwner && (
+            <div className="detail-tabs">
+              <button className={detailTab === 'questions' ? 'active' : ''} onClick={() => setDetailTab('questions')}>
+                <Icons.Document />
+                Exerciții
+              </button>
+              <button className={detailTab === 'responses' ? 'active' : ''} onClick={() => { setDetailTab('responses'); fetchStudentResponses(selectedAssessment.id) }}>
+                <Icons.People />
+                Răspunsuri studenți ({studentResponses.length})
+              </button>
             </div>
+          )}
 
-            <div className="detail-questions">
-              {(!selectedAssessment.questions || selectedAssessment.questions.length === 0) ? (
-                <div className="info-card">
-                  <p className="text-muted">Această evaluare nu conține exerciții.</p>
-                </div>
-              ) : (
-                <form onSubmit={handleSubmitAllAnswers}>
-                  {selectedAssessment.questions.map((q, idx) => (
-                    <div className="question-card" key={q.id}>
-                      <div className="question-header">
-                        <span className="question-number">Exercițiul {idx + 1}</span>
-                        <span className="question-points">{q.points} puncte</span>
-                      </div>
-                      <p className="question-text">{q.text}</p>
+          {detailTab === 'questions' && (
+            <div className="detail-layout">
+              <div className="detail-sidebar">
+                <ParticleCard className="info-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+                  <h3>Descriere</h3>
+                  <p>{selectedAssessment.description || 'Nicio descriere disponibilă.'}</p>
+                </ParticleCard>
+                <ParticleCard className="info-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+                  <h3>Detalii</h3>
+                  <div className="info-row">
+                    <span><Icons.Clock /> Durată:</span>
+                    <strong>{selectedAssessment.duration} minute</strong>
+                  </div>
+                  <div className="info-row">
+                    <span><Icons.People /> Răspunsuri:</span>
+                    <strong>{selectedAssessment.response_count}</strong>
+                  </div>
+                  <div className="info-row">
+                    <span><Icons.Document /> Exerciții:</span>
+                    <strong>{(selectedAssessment.questions || []).length}</strong>
+                  </div>
+                </ParticleCard>
+              </div>
 
-                      {(q.question_type === 'multiple_choice') && q.options && (
-                        <div className="question-options">
-                          {q.options.map((opt, oi) => (
-                            <label key={oi} className="option-label">
-                              <input
-                                type="radio"
-                                name={`q-${q.id}`}
-                                value={opt}
-                                checked={answers[q.id] === opt}
-                                onChange={() => setAnswers((p) => ({ ...p, [q.id]: opt }))}
-                              />
-                              <span>{opt}</span>
-                            </label>
-                          ))}
+              <div className="detail-questions">
+                {(!selectedAssessment.questions || selectedAssessment.questions.length === 0) ? (
+                  <div className="info-card">
+                    <p className="text-muted">Această evaluare nu conține exerciții.</p>
+                  </div>
+                ) : canAnswer ? (
+                  <form onSubmit={handleSubmitAllAnswers}>
+                    {selectedAssessment.questions.map((q, idx) => (
+                      <ParticleCard className="question-card magic-bento-card magic-bento-card--border-glow" key={q.id} disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+                        <div className="question-header">
+                          <span className="question-number">Exercițiul {idx + 1}</span>
+                          <span className="question-points">{q.points} puncte</span>
                         </div>
-                      )}
+                        <p className="question-text">{q.text}</p>
 
-                      {(q.question_type === 'checkboxes') && q.options && (
-                        <div className="question-options">
-                          {q.options.map((opt, oi) => {
-                            const selected = (answers[q.id] || '').split('||')
-                            const isChecked = selected.includes(opt)
-                            return (
+                        {(q.question_type === 'multiple_choice') && q.options && (
+                          <div className="question-options">
+                            {q.options.map((opt, oi) => (
                               <label key={oi} className="option-label">
                                 <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  onChange={() => {
-                                    const next = isChecked
-                                      ? selected.filter((s) => s !== opt)
-                                      : [...selected.filter(Boolean), opt]
-                                    setAnswers((p) => ({ ...p, [q.id]: next.join('||') }))
-                                  }}
+                                  type="radio"
+                                  name={`q-${q.id}`}
+                                  value={opt}
+                                  checked={answers[q.id] === opt}
+                                  onChange={() => setAnswers((p) => ({ ...p, [q.id]: opt }))}
                                 />
                                 <span>{opt}</span>
                               </label>
-                            )
-                          })}
-                        </div>
-                      )}
-
-                      {q.question_type === 'short_answer' && (
-                        <input
-                          type="text"
-                          className="question-input"
-                          placeholder="Răspunsul tău..."
-                          value={answers[q.id] || ''}
-                          onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
-                        />
-                      )}
-
-                      {q.question_type === 'long_answer' && (
-                        <textarea
-                          className="question-textarea"
-                          placeholder="Scrie răspunsul tău aici..."
-                          rows={5}
-                          value={answers[q.id] || ''}
-                          onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
-                        />
-                      )}
-
-                      {feedbackResults[q.id] && (
-                        <div className="question-feedback">
-                          <h4>Feedback</h4>
-                          <ul className="feedback-list">
-                            {feedbackResults[q.id].feedback?.map((item, fi) => (
-                              <li key={fi}>
-                                <span className="badge">{item.category}</span>
-                                <span className={`badge source-badge ${item.source?.startsWith('ai:') ? 'ai' : 'rule'}`}>
-                                  {item.source?.startsWith('ai:') ? 'AI' : 'Reguli'}
-                                </span>
-                                <p>{item.message}</p>
-                              </li>
                             ))}
-                          </ul>
+                          </div>
+                        )}
+
+                        {(q.question_type === 'checkboxes') && q.options && (
+                          <div className="question-options">
+                            {q.options.map((opt, oi) => {
+                              const selected = (answers[q.id] || '').split('||')
+                              const isChecked = selected.includes(opt)
+                              return (
+                                <label key={oi} className="option-label">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => {
+                                      const next = isChecked
+                                        ? selected.filter((s) => s !== opt)
+                                        : [...selected.filter(Boolean), opt]
+                                      setAnswers((p) => ({ ...p, [q.id]: next.join('||') }))
+                                    }}
+                                  />
+                                  <span>{opt}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        )}
+
+                        {q.question_type === 'short_answer' && (
+                          <input
+                            type="text"
+                            className="question-input"
+                            placeholder="Răspunsul tău..."
+                            value={answers[q.id] || ''}
+                            onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
+                          />
+                        )}
+
+                        {q.question_type === 'long_answer' && (
+                          <textarea
+                            className="question-textarea"
+                            placeholder="Scrie răspunsul tău aici..."
+                            rows={5}
+                            value={answers[q.id] || ''}
+                            onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
+                          />
+                        )}
+
+                        {feedbackResults[q.id] && (
+                          <div className={`question-feedback ${feedbackResults[q.id].is_correct === true ? 'correct' : feedbackResults[q.id].is_correct === false ? 'incorrect' : ''}`}>
+                            {feedbackResults[q.id].score != null && (
+                              <div className="auto-score">
+                                <span className={`score-badge ${feedbackResults[q.id].is_correct ? 'correct' : 'incorrect'}`}>
+                                  {feedbackResults[q.id].is_correct ? '✓' : '✗'} {feedbackResults[q.id].score}/{q.points} puncte
+                                </span>
+                              </div>
+                            )}
+                            <h4>Feedback</h4>
+                            <ul className="feedback-list">
+                              {feedbackResults[q.id].feedback?.map((item, fi) => (
+                                <li key={fi}>
+                                  <span className="badge">{item.category}</span>
+                                  <span className={`badge source-badge ${feedbackSourceClass(item.source)}`}>
+                                    {feedbackSourceLabel(item.source)}
+                                  </span>
+                                  <p>{item.message}</p>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </ParticleCard>
+                    ))}
+                    <div className="submit-bar">
+                      <div className="feedback-mode-selector">
+                        <label>Mod feedback:</label>
+                        <select value={feedbackMode} onChange={(e) => setFeedbackMode(e.target.value)}>
+                          <option value="ai">AI (Groq)</option>
+                          <option value="rule_based">Reguli simple</option>
+                        </select>
+                      </div>
+                      <button 
+                        type="submit" 
+                        className="btn-primary submit-all-btn"
+                        disabled={isGeneratingFeedback}
+                      >
+                        {isGeneratingFeedback ? 'Se generează feedback...' : (
+                          <>
+                            <Icons.Send />
+                            Trimite toate răspunsurile
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div>
+                    {selectedAssessment.questions.map((q, idx) => (
+                      <ParticleCard className="question-card magic-bento-card magic-bento-card--border-glow" key={q.id} disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+                        <div className="question-header">
+                          <span className="question-number">Exercițiul {idx + 1}</span>
+                          <span className="question-points">{q.points} puncte</span>
                         </div>
-                      )}
-                    </div>
-                  ))}
-                  <div className="submit-bar">
-                    <div className="feedback-mode-selector">
-                      <label>Mod feedback:</label>
-                      <select value={feedbackMode} onChange={(e) => setFeedbackMode(e.target.value)}>
-                        <option value="ai">AI (Groq)</option>
-                        <option value="rule_based">Reguli simple</option>
-                      </select>
-                    </div>
-                    <button 
-                      type="submit" 
-                      className="btn-primary submit-all-btn"
-                      disabled={isGeneratingFeedback}
-                    >
-                      {isGeneratingFeedback ? 'Se generează feedback...' : (
-                        <>
-                          <Icons.Send />
-                          Trimite toate răspunsurile
-                        </>
-                      )}
-                    </button>
+                        <p className="question-text">{q.text}</p>
+                        {q.options && (
+                          <div className="question-options preview">
+                            {q.options.map((opt, oi) => (
+                              <span key={oi} className="option-preview">{q.question_type === 'multiple_choice' ? '○' : '☐'} {opt}</span>
+                            ))}
+                          </div>
+                        )}
+                        {q.correct_answer && (
+                          <p className="correct-answer-preview">Răspuns corect: <strong>{q.correct_answer}</strong></p>
+                        )}
+                      </ParticleCard>
+                    ))}
                   </div>
-                </form>
+                )}
+              </div>
+            </div>
+          )}
+
+          {detailTab === 'responses' && isOwner && (
+            <div className="responses-view">
+              {Object.keys(groupedByStudent).length === 0 ? (
+                <div className="empty-state">
+                  <Icons.People />
+                  <p>Niciun student nu a răspuns încă la această evaluare.</p>
+                </div>
+              ) : (
+                Object.entries(groupedByStudent).map(([userId, { name, responses }]) => (
+                  <ParticleCard className="student-response-card magic-bento-card magic-bento-card--border-glow" key={userId} disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+                    <div className="student-response-header">
+                      <Icons.People />
+                      <h3>{name}</h3>
+                      <span className="response-count">{responses.length} răspunsuri</span>
+                    </div>
+                    <div className="student-answers-list">
+                      {responses.map((r) => {
+                        const q = questionsMap[r.question_id]
+                        return (
+                          <div className="student-answer-item" key={r.id}>
+                            <div className="sa-question">
+                              <span className="sa-label">{q ? `Ex. ${(selectedAssessment.questions || []).indexOf(q) + 1}` : `#${r.question_id || '?'}`}</span>
+                              <span className="sa-question-text">{q?.text || 'Întrebare necunoscută'}</span>
+                            </div>
+                            <div className="sa-answer">
+                              <span className="sa-label">Răspuns:</span>
+                              <p>{r.answer_text}</p>
+                            </div>
+                            {r.score != null && (
+                              <div className="sa-score">
+                                Scor: <strong>{r.score}/{q?.points || '?'}</strong>
+                              </div>
+                            )}
+                            {r.feedback && r.feedback.length > 0 && (
+                              <div className="sa-feedback">
+                                <span className="sa-label">Feedback existent:</span>
+                                <ul className="feedback-list">
+                                  {r.feedback.map((fb, fi) => (
+                                    <li key={fi}>
+                                      <span className="badge">{fb.category}</span>
+                                      <span className={`badge source-badge ${feedbackSourceClass(fb.source)}`}>
+                                        {feedbackSourceLabel(fb.source)}
+                                      </span>
+                                      <p>{fb.message}</p>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                            <div className="sa-reevaluate">
+                              <div className="reeval-row">
+                                <label>
+                                  Scor
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={q?.points || 100}
+                                    placeholder={r.score != null ? String(r.score) : '—'}
+                                    value={reevalForm[r.id]?.score ?? ''}
+                                    onChange={(e) => setReevalForm((p) => ({ ...p, [r.id]: { ...p[r.id], score: e.target.value } }))}
+                                  />
+                                </label>
+                                <label className="reeval-feedback-label">
+                                  Feedback profesor
+                                  <input
+                                    type="text"
+                                    placeholder="Adaugă feedback..."
+                                    value={reevalForm[r.id]?.feedback_message ?? ''}
+                                    onChange={(e) => setReevalForm((p) => ({ ...p, [r.id]: { ...p[r.id], feedback_message: e.target.value } }))}
+                                  />
+                                </label>
+                              </div>
+                              <button className="btn-secondary btn-sm" onClick={() => handleReevaluate(r.id)}>
+                                Reevaluează
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </ParticleCard>
+                ))
               )}
             </div>
-          </div>
+          )}
         </main>
       </div>
     )
@@ -971,6 +1180,8 @@ function App() {
   }
 
   // Dashboard view
+  const isProfessor = user?.role === 'professor'
+
   return (
     <div className="app-layout">
       <Navbar />
@@ -978,10 +1189,10 @@ function App() {
       <main className="main-content">
         <div className="page-header">
           <div>
-            <h1>Dashboard</h1>
-            <p>{user?.role === 'professor' ? 'Gestionează evaluările și urmărește progresul studenților' : 'Evaluări disponibile'}</p>
+            <h1>{isProfessor ? 'Dashboard' : `Bine ai venit, ${user?.full_name?.split(' ')[0] || 'Student'}!`}</h1>
+            <p>{isProfessor ? 'Gestionează evaluările și urmărește progresul studenților' : 'Evaluările tale disponibile sunt mai jos. Selectează una pentru a începe.'}</p>
           </div>
-          {user?.role === 'professor' && (
+          {isProfessor && (
             <button className="btn-primary" onClick={() => setView('new')}>
               <Icons.Plus />
               Evaluare nouă
@@ -989,45 +1200,70 @@ function App() {
           )}
         </div>
 
-        <div className="stats-grid bento-section" ref={dashboardGridRef}>
-          <GlobalSpotlight gridRef={dashboardGridRef} disableAnimations={isMobile} spotlightRadius={400} glowColor="132, 0, 255" />
-          <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={12} glowColor="132, 0, 255" enableTilt={false} clickEffect>
-            <div className="stat-info">
-              <span className="stat-label">TOTAL EVALUĂRI</span>
-              <span className="stat-value">{stats.total}</span>
-            </div>
-            <div className="stat-icon blue">
-              <Icons.Document />
-            </div>
-          </ParticleCard>
-          <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={12} glowColor="132, 0, 255" enableTilt={false} clickEffect>
-            <div className="stat-info">
-              <span className="stat-label">ACTIVE</span>
-              <span className="stat-value">{stats.active}</span>
-            </div>
-            <div className="stat-icon green">
-              <Icons.Clock />
-            </div>
-          </ParticleCard>
-          <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={12} glowColor="132, 0, 255" enableTilt={false} clickEffect>
-            <div className="stat-info">
-              <span className="stat-label">TOTAL RĂSPUNSURI</span>
-              <span className="stat-value">{stats.responses}</span>
-            </div>
-            <div className="stat-icon orange">
-              <Icons.People />
-            </div>
-          </ParticleCard>
-          <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={12} glowColor="132, 0, 255" enableTilt={false} clickEffect>
-            <div className="stat-info">
-              <span className="stat-label">SCOR MEDIU</span>
-              <span className="stat-value">{stats.avgScore}%</span>
-            </div>
-            <div className="stat-icon pink">
-              <Icons.Trend />
-            </div>
-          </ParticleCard>
-        </div>
+        {isProfessor && (
+          <div className="stats-grid bento-section" ref={dashboardGridRef}>
+            <GlobalSpotlight gridRef={dashboardGridRef} disableAnimations={isMobile} spotlightRadius={400} glowColor="132, 0, 255" />
+            <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={12} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+              <div className="stat-info">
+                <span className="stat-label">TOTAL EVALUĂRI</span>
+                <span className="stat-value">{stats.total}</span>
+              </div>
+              <div className="stat-icon blue">
+                <Icons.Document />
+              </div>
+            </ParticleCard>
+            <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={12} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+              <div className="stat-info">
+                <span className="stat-label">ACTIVE</span>
+                <span className="stat-value">{stats.active}</span>
+              </div>
+              <div className="stat-icon green">
+                <Icons.Clock />
+              </div>
+            </ParticleCard>
+            <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={12} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+              <div className="stat-info">
+                <span className="stat-label">TOTAL RĂSPUNSURI</span>
+                <span className="stat-value">{stats.responses}</span>
+              </div>
+              <div className="stat-icon orange">
+                <Icons.People />
+              </div>
+            </ParticleCard>
+            <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={12} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+              <div className="stat-info">
+                <span className="stat-label">SCOR MEDIU</span>
+                <span className="stat-value">{stats.avgScore}%</span>
+              </div>
+              <div className="stat-icon pink">
+                <Icons.Trend />
+              </div>
+            </ParticleCard>
+          </div>
+        )}
+
+        {!isProfessor && (
+          <div className="student-welcome-stats">
+            <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow student-stat-wide" disableAnimations={isMobile} particleCount={10} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+              <div className="stat-info">
+                <span className="stat-label">EVALUĂRI DISPONIBILE</span>
+                <span className="stat-value">{stats.total}</span>
+              </div>
+              <div className="stat-icon blue">
+                <Icons.Document />
+              </div>
+            </ParticleCard>
+            <ParticleCard className="stat-card magic-bento-card magic-bento-card--border-glow student-stat-wide" disableAnimations={isMobile} particleCount={10} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+              <div className="stat-info">
+                <span className="stat-label">RĂSPUNSURILE TALE</span>
+                <span className="stat-value">{stats.responses}</span>
+              </div>
+              <div className="stat-icon green">
+                <Icons.Trend />
+              </div>
+            </ParticleCard>
+          </div>
+        )}
 
         <div className="filters-bar">
           <div className="search-box">
@@ -1039,32 +1275,14 @@ function App() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <div className="filter-tabs">
-            <button
-              className={filter === 'all' ? 'active' : ''}
-              onClick={() => setFilter('all')}
-            >
-              Toate
-            </button>
-            <button
-              className={filter === 'draft' ? 'active' : ''}
-              onClick={() => setFilter('draft')}
-            >
-              Draft
-            </button>
-            <button
-              className={filter === 'active' ? 'active' : ''}
-              onClick={() => setFilter('active')}
-            >
-              Active
-            </button>
-            <button
-              className={filter === 'closed' ? 'active' : ''}
-              onClick={() => setFilter('closed')}
-            >
-              Închise
-            </button>
-          </div>
+          {isProfessor && (
+            <div className="filter-tabs">
+              <button className={filter === 'all' ? 'active' : ''} onClick={() => setFilter('all')}>Toate</button>
+              <button className={filter === 'draft' ? 'active' : ''} onClick={() => setFilter('draft')}>Draft</button>
+              <button className={filter === 'active' ? 'active' : ''} onClick={() => setFilter('active')}>Active</button>
+              <button className={filter === 'closed' ? 'active' : ''} onClick={() => setFilter('closed')}>Închise</button>
+            </div>
+          )}
         </div>
 
         <div className="assessments-grid">
@@ -1073,10 +1291,15 @@ function App() {
           ) : filteredAssessments.length === 0 ? (
             <div className="empty-state">
               <Icons.Document />
-              <p>Nu există evaluări{filter !== 'all' ? ` cu statusul "${filter}"` : ''}</p>
-              <button className="btn-primary" onClick={() => setView('new')}>
-                Creează prima evaluare
-              </button>
+              <p>{isProfessor
+                ? `Nu există evaluări${filter !== 'all' ? ` cu statusul "${filter}"` : ''}`
+                : 'Nu există evaluări disponibile momentan. Revino mai târziu!'
+              }</p>
+              {isProfessor && (
+                <button className="btn-primary" onClick={() => setView('new')}>
+                  Creează prima evaluare
+                </button>
+              )}
             </div>
           ) : (
             filteredAssessments.map((assessment) => (
@@ -1099,28 +1322,45 @@ function App() {
                       <h3>{assessment.title}</h3>
                       <span className="subject">{assessment.subject || 'General'}</span>
                     </div>
-                    <span className={`status-badge ${assessment.status}`}>{assessment.status}</span>
+                    {isProfessor && (
+                      <span className={`status-badge ${assessment.status}`}>{assessment.status}</span>
+                    )}
                   </div>
                   <p className="card-description">
                     {assessment.description || 'Nicio descriere disponibilă'}
                   </p>
-                  {assessment.author_name && user?.role === 'student' && (
+                  {!isProfessor && assessment.author_name && (
                     <p className="card-author">Profesor: {assessment.author_name}</p>
                   )}
                   <div className="card-footer">
                     <div className="card-meta">
-                      <span>
-                        <Icons.People />
-                        {assessment.response_count ?? 0} răspunsuri
-                      </span>
+                      {isProfessor && (
+                        <span>
+                          <Icons.People />
+                          {assessment.response_count ?? 0} răspunsuri
+                        </span>
+                      )}
                       <span>
                         <Icons.Clock />
                         {assessment.duration ?? 30} min
                       </span>
+                      {!isProfessor && (
+                        <span>
+                          <Icons.Document />
+                          {(assessment.questions || []).length} exerciții
+                        </span>
+                      )}
                     </div>
-                    <button className="btn-icon" onClick={(e) => { e.stopPropagation(); handleOpenAssessment(assessment); }}>
-                      <Icons.Arrow />
-                    </button>
+                    {isProfessor ? (
+                      <button className="btn-icon" onClick={(e) => { e.stopPropagation(); handleOpenAssessment(assessment); }}>
+                        <Icons.Arrow />
+                      </button>
+                    ) : (
+                      <button className="btn-start" onClick={(e) => { e.stopPropagation(); handleOpenAssessment(assessment); }}>
+                        Începe
+                        <Icons.Arrow />
+                      </button>
+                    )}
                   </div>
                 </div>
               </ParticleCard>

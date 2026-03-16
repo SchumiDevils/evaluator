@@ -9,8 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..db.session import get_session
-from ..models import Evaluation, Question, Response, User
+from ..models import Evaluation, Feedback, Question, Response, User
 from ..models.user import UserRole
+from ..schemas.feedback import (
+    FeedbackItemSchema,
+    ProfessorFeedbackUpdate,
+    ResponseRead,
+)
 from .auth import get_current_user
 
 router = APIRouter(prefix="/evaluations", tags=["evaluations"])
@@ -53,6 +58,7 @@ class EvaluationRead(BaseModel):
     status: str
     response_count: int = 0
     questions: List[QuestionRead] = []
+    author_id: Optional[int] = None
     author_name: Optional[str] = None
 
     class Config:
@@ -92,6 +98,7 @@ async def _build_evaluation_read(session: AsyncSession, ev: Evaluation) -> Evalu
         duration=ev.duration,
         status=ev.status,
         response_count=response_count,
+        author_id=ev.author_id,
         author_name=author_name,
         questions=[
             QuestionRead(
@@ -292,3 +299,85 @@ async def delete_evaluation(
     await session.delete(evaluation)
     await session.commit()
     return {"deleted": True}
+
+
+# --- Student responses for professor ---
+
+@router.get("/{evaluation_id}/responses", response_model=List[ResponseRead])
+async def list_evaluation_responses(
+    evaluation_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> List[ResponseRead]:
+    ev_result = await session.execute(
+        select(Evaluation).where(
+            Evaluation.id == evaluation_id, Evaluation.author_id == current_user.id
+        )
+    )
+    if not ev_result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
+
+    result = await session.execute(
+        select(Response)
+        .where(Response.evaluation_id == evaluation_id)
+        .options(selectinload(Response.feedback_items), selectinload(Response.author))
+        .order_by(Response.created_at.desc())
+    )
+    responses = result.scalars().all()
+
+    return [
+        ResponseRead(
+            id=r.id,
+            answer_text=r.answer_text,
+            evaluation_id=r.evaluation_id,
+            question_id=r.question_id,
+            score=r.score,
+            mode=r.mode,
+            user_id=r.user_id,
+            user_name=r.author.full_name if r.author else None,
+            created_at=r.created_at,
+            feedback=[
+                FeedbackItemSchema(
+                    category=fb.category, message=fb.message, source=fb.source
+                )
+                for fb in r.feedback_items
+            ],
+        )
+        for r in responses
+    ]
+
+
+@router.put("/responses/{response_id}/feedback")
+async def professor_reevaluate(
+    response_id: int,
+    payload: ProfessorFeedbackUpdate,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    resp_result = await session.execute(
+        select(Response)
+        .where(Response.id == response_id)
+        .options(selectinload(Response.evaluation))
+    )
+    response = resp_result.scalar_one_or_none()
+    if not response:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Response not found")
+
+    if not response.evaluation or response.evaluation.author_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Nu ai permisiunea.")
+
+    if payload.score is not None:
+        response.score = payload.score
+
+    if payload.feedback_message:
+        session.add(
+            Feedback(
+                response_id=response.id,
+                category="Profesor",
+                message=payload.feedback_message,
+                source="professor",
+            )
+        )
+
+    await session.commit()
+    return {"updated": True, "score": response.score}

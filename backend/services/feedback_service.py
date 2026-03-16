@@ -5,9 +5,41 @@ from typing import Iterable, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..feedback_engine import generate_feedback
-from ..models import Feedback, Response, User
+from ..models import Feedback, Question, Response, User
 from ..schemas.feedback import FeedbackItemSchema, FeedbackResponse
 from .ai_client import generate_ai_feedback
+
+
+def _normalize_set(raw: str) -> set[str]:
+    if "||" in raw:
+        return {s.strip().lower() for s in raw.split("||") if s.strip()}
+    return {s.strip().lower() for s in raw.split(",") if s.strip()}
+
+
+def _auto_correct(answer: str, question: Question) -> tuple[bool, int, list[FeedbackItemSchema]]:
+    correct = question.correct_answer or ""
+    points = question.points or 0
+
+    if question.question_type == "checkboxes":
+        student_set = _normalize_set(answer)
+        correct_set = _normalize_set(correct)
+        is_correct = student_set == correct_set
+    else:
+        is_correct = answer.strip().lower() == correct.strip().lower()
+
+    score = points if is_correct else 0
+
+    if is_correct:
+        fb = [FeedbackItemSchema(category="Rezultat", message="Răspuns corect!", source="auto")]
+    else:
+        display_correct = ", ".join(s.strip() for s in correct.replace("||", ",").split(",") if s.strip())
+        fb = [FeedbackItemSchema(
+            category="Rezultat",
+            message=f"Răspuns greșit. Răspunsul corect era: {display_correct}",
+            source="auto",
+        )]
+
+    return is_correct, score, fb
 
 
 async def generate_and_store_feedback(
@@ -16,20 +48,42 @@ async def generate_and_store_feedback(
     answer: str,
     mode: str = "rule_based",
     evaluation_id: Optional[int] = None,
+    question_id: Optional[int] = None,
+    question: Optional[Question] = None,
     user: Optional[User] = None,
     rubric: Optional[Iterable[str]] = None,
 ) -> FeedbackResponse:
+    is_correct: Optional[bool] = None
+    score: Optional[int] = None
+
+    can_auto = (
+        question is not None
+        and question.question_type in ("multiple_choice", "checkboxes")
+        and question.correct_answer
+    )
+
+    if can_auto:
+        mode = "auto"
+
     response = Response(
         answer_text=answer,
         evaluation_id=evaluation_id,
+        question_id=question_id,
         user_id=user.id if user else None,
         mode=mode,
     )
     session.add(response)
     await session.flush()
 
-    if mode == "ai":
-        ai_result = await generate_ai_feedback(answer, rubric=rubric)
+    if can_auto:
+        is_correct, score, feedback_items = _auto_correct(answer, question)
+        response.score = score
+    elif mode == "ai":
+        q_type = question.question_type if question else None
+        q_text = question.text if question else None
+        ai_result = await generate_ai_feedback(
+            answer, rubric=rubric, question_type=q_type, question_text=q_text,
+        )
         feedback_items = ai_result.feedback
         response.token_usage = ai_result.token_usage
     else:
@@ -46,6 +100,11 @@ async def generate_and_store_feedback(
         )
 
     await session.commit()
-    return FeedbackResponse(response_id=response.id, feedback=feedback_items)
+    return FeedbackResponse(
+        response_id=response.id,
+        score=score,
+        is_correct=is_correct,
+        feedback=feedback_items,
+    )
 
 
