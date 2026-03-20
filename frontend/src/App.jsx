@@ -948,9 +948,9 @@ function App() {
     }
   }
 
-  const handleOpenAnalytics = async () => {
-    await fetchAnalytics()
+  const handleOpenAnalytics = () => {
     setView('analytics')
+    fetchAnalytics()
   }
 
   const handleOpenMyResponses = async () => {
@@ -1678,8 +1678,11 @@ function App() {
     itemStyle: { color: '#e0d4ff' },
   }
 
-  if (view === 'analytics' && analyticsData) {
-    const { score_distribution, question_success, evaluation_averages, student_evolution } = analyticsData
+  if (view === 'analytics') {
+    const score_distribution = analyticsData?.score_distribution || []
+    const question_success = analyticsData?.question_success || []
+    const evaluation_averages = analyticsData?.evaluation_averages || []
+    const student_evolution = analyticsData?.student_evolution || []
     return (
       <div className="app-layout">
         <Navbar />
@@ -1696,6 +1699,9 @@ function App() {
             </div>
           </div>
 
+          {isAnalyticsLoading ? (
+            <div className="loading-container"><div className="spinner" /><p>Se încarcă analizele...</p></div>
+          ) : (
           <div className="analytics-grid">
             <div className="analytics-card">
               <h3>Distribuția Scorurilor</h3>
@@ -1781,6 +1787,7 @@ function App() {
               </div>
             )}
           </div>
+          )}
         </main>
       </div>
     )
