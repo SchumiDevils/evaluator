@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .core.config import get_settings
 from .db.session import engine
 from .models import Base
-from .routers import auth, evaluations, feedback
+from .routers import analytics, auth, evaluations, feedback
 
 settings = get_settings()
 
@@ -35,3 +35,4 @@ async def healthcheck() -> dict[str, str]:
 app.include_router(auth.router, prefix=settings.api_v1_prefix)
 app.include_router(evaluations.router, prefix=settings.api_v1_prefix)
 app.include_router(feedback.router, prefix=settings.api_v1_prefix)
+app.include_router(analytics.router, prefix=settings.api_v1_prefix)

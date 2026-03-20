@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { animate, stagger } from 'animejs'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend, Cell } from 'recharts'
 import Silk from './components/Silk'
 import { ParticleCard, GlobalSpotlight, useMobileDetection } from './components/MagicBento'
 import rubrixLogo from './assets/rubrix-logo.svg'
@@ -310,6 +311,11 @@ const Icons = {
     <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
       <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
     </svg>
+  ),
+  Chart: () => (
+    <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+      <path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z"/>
+    </svg>
   )
 }
 
@@ -354,6 +360,8 @@ function App() {
   const [studentResponses, setStudentResponses] = useState([])
   const [myResponses, setMyResponses] = useState([])
   const [myAllResponses, setMyAllResponses] = useState([])
+  const [analyticsData, setAnalyticsData] = useState(null)
+  const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false)
   const [isMyResponsesLoading, setIsMyResponsesLoading] = useState(false)
   const [detailTab, setDetailTab] = useState('questions')
   const [reevalForm, setReevalForm] = useState({})
@@ -924,6 +932,27 @@ function App() {
     }
   }
 
+  const fetchAnalytics = async () => {
+    setIsAnalyticsLoading(true)
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/analytics/`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        setAnalyticsData(await res.json())
+      }
+    } catch {
+      setError('Nu s-au putut încărca analizele.')
+    } finally {
+      setIsAnalyticsLoading(false)
+    }
+  }
+
+  const handleOpenAnalytics = async () => {
+    await fetchAnalytics()
+    setView('analytics')
+  }
+
   const handleOpenMyResponses = async () => {
     await fetchMyAllResponses()
     setView('my-responses')
@@ -1086,6 +1115,13 @@ function App() {
             <span>New Assessment</span>
           </button>
         )}
+        <button
+          className={view === 'analytics' ? 'active' : ''}
+          onClick={handleOpenAnalytics}
+        >
+          <Icons.Chart />
+          <span>Analize</span>
+        </button>
         {user?.role === 'student' && (
           <button
             className={view === 'my-responses' ? 'active' : ''}
@@ -1629,6 +1665,122 @@ function App() {
               })}
             </div>
           )}
+        </main>
+      </div>
+    )
+  }
+
+  // Analytics view
+  const CHART_COLORS = ['#8B5CF6', '#A78BFA', '#7C3AED', '#6D28D9', '#C4B5FD', '#DDD6FE']
+  const chartTooltipStyle = {
+    contentStyle: { background: '#1a1025', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 8, color: '#e0d4ff' },
+    labelStyle: { color: '#a78bfa' },
+    itemStyle: { color: '#e0d4ff' },
+  }
+
+  if (view === 'analytics' && analyticsData) {
+    const { score_distribution, question_success, evaluation_averages, student_evolution } = analyticsData
+    return (
+      <div className="app-layout">
+        <Navbar />
+        {notifications}
+        <main className="main-content">
+          <div className="page-header">
+            <div>
+              <button className="btn-back" onClick={() => setView('dashboard')}>
+                <Icons.Back />
+                Înapoi
+              </button>
+              <h1>Analize & Statistici</h1>
+              <p>{isProfessor ? 'Vizualizează performanța studenților tăi' : 'Urmărește-ți progresul'}</p>
+            </div>
+          </div>
+
+          <div className="analytics-grid">
+            <div className="analytics-card">
+              <h3>Distribuția Scorurilor</h3>
+              <p className="analytics-subtitle">Câte răspunsuri per interval de scor</p>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={score_distribution} margin={{ top: 20, right: 20, bottom: 20, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(139,92,246,0.15)" />
+                  <XAxis dataKey="range" stroke="#a78bfa" fontSize={12} />
+                  <YAxis stroke="#a78bfa" fontSize={12} allowDecimals={false} />
+                  <Tooltip {...chartTooltipStyle} />
+                  <Bar dataKey="count" name="Răspunsuri" radius={[6, 6, 0, 0]}>
+                    {score_distribution.map((_, i) => (
+                      <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="analytics-card">
+              <h3>{isProfessor ? 'Media per Evaluare' : 'Scorul tău vs. Media Clasei'}</h3>
+              <p className="analytics-subtitle">
+                {isProfessor ? 'Scorul mediu al clasei per evaluare' : 'Compară performanța ta cu restul clasei'}
+              </p>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={evaluation_averages} margin={{ top: 20, right: 20, bottom: 20, left: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(139,92,246,0.15)" />
+                  <XAxis dataKey="evaluation_title" stroke="#a78bfa" fontSize={11} interval={0} angle={-15} textAnchor="end" height={60} />
+                  <YAxis stroke="#a78bfa" fontSize={12} domain={[0, 100]} unit="%" />
+                  <Tooltip {...chartTooltipStyle} formatter={(v) => `${v}%`} />
+                  <Legend wrapperStyle={{ color: '#e0d4ff', fontSize: 12 }} />
+                  <Bar dataKey="class_avg_percent" name="Media clasei" fill="#8B5CF6" radius={[6, 6, 0, 0]} />
+                  {!isProfessor && (
+                    <Bar dataKey="student_avg_percent" name="Scorul tău" fill="#22d3ee" radius={[6, 6, 0, 0]} />
+                  )}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="analytics-card">
+              <h3>Rata de Succes per Întrebare</h3>
+              <p className="analytics-subtitle">Procentul mediu obținut la fiecare întrebare</p>
+              {question_success.length > 0 ? (
+                <ResponsiveContainer width="100%" height={Math.max(300, question_success.length * 45)}>
+                  <BarChart data={question_success} layout="vertical" margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(139,92,246,0.15)" />
+                    <XAxis type="number" stroke="#a78bfa" fontSize={12} domain={[0, 100]} unit="%" />
+                    <YAxis type="category" dataKey="question_text" stroke="#a78bfa" fontSize={11} width={200} tick={{ fill: '#c4b5fd' }} />
+                    <Tooltip {...chartTooltipStyle} formatter={(v) => `${v}%`} />
+                    <Bar dataKey="avg_percent" name="Media %" fill="#A78BFA" radius={[0, 6, 6, 0]}>
+                      {question_success.map((entry, i) => (
+                        <Cell key={i} fill={entry.avg_percent >= 70 ? '#22c55e' : entry.avg_percent >= 40 ? '#f59e0b' : '#ef4444'} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-muted" style={{ padding: '2rem', textAlign: 'center' }}>Nu sunt date suficiente.</p>
+              )}
+            </div>
+
+            {!isProfessor && student_evolution && student_evolution.length > 0 && (
+              <div className="analytics-card">
+                <h3>Evoluția Scorurilor Tale</h3>
+                <p className="analytics-subtitle">Cum ai progresat de la o evaluare la alta</p>
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={student_evolution} margin={{ top: 20, right: 20, bottom: 20, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(139,92,246,0.15)" />
+                    <XAxis dataKey="evaluation_title" stroke="#a78bfa" fontSize={11} angle={-15} textAnchor="end" height={60} />
+                    <YAxis stroke="#a78bfa" fontSize={12} domain={[0, 100]} unit="%" />
+                    <Tooltip {...chartTooltipStyle} formatter={(v) => `${v}%`} />
+                    <Line
+                      type="monotone"
+                      dataKey="score_percent"
+                      name="Scor"
+                      stroke="#8B5CF6"
+                      strokeWidth={3}
+                      dot={{ fill: '#8B5CF6', strokeWidth: 2, r: 6 }}
+                      activeDot={{ r: 8, fill: '#A78BFA' }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
         </main>
       </div>
     )
