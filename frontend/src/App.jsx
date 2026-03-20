@@ -374,6 +374,7 @@ function App() {
   const autoSubmitRef = useRef(false)
 
   const dashboardGridRef = useRef(null)
+  const isProfessor = user?.role === 'professor'
   const isMobile = useMobileDetection()
 
   useEffect(() => {
@@ -1973,7 +1974,6 @@ function App() {
   }
 
   // Dashboard view
-  const isProfessor = user?.role === 'professor'
 
   return (
     <div className="app-layout">
