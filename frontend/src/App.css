@@ -2128,6 +2128,29 @@
   margin: 0 auto 2rem;
 }
 
+.public-exam-header-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.25rem 2rem;
+}
+
+.public-exam-header-text {
+  flex: 1;
+  min-width: 200px;
+}
+
+.public-exam-timer-wrap {
+  flex-shrink: 0;
+  margin: 0 auto;
+}
+
+.public-exam-timer-hint {
+  font-size: 0.9rem;
+  margin-top: 0.75rem;
+}
+
 .public-exam-header h1 {
   font-size: 1.75rem;
   margin-bottom: 0.5rem;

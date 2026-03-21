@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
+import AnimeTimer from './components/AnimeTimer'
 import './App.css'
 
 const API_PREFIX = '/api/v1'
+const sessionKey = (linkId) => `rubrix_public_session_${linkId}`
 
 const Icons = {
   Send: () => (
@@ -22,6 +24,13 @@ export default function PublicExam({ linkId, apiUrl }) {
   const [isGenerating, setIsGenerating] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
+  const [sessionToken, setSessionToken] = useState(null)
+  const [timeRemaining, setTimeRemaining] = useState(null)
+  const [totalSeconds, setTotalSeconds] = useState(0)
+  const [timerExpired, setTimerExpired] = useState(false)
+  const [sessionReady, setSessionReady] = useState(false)
+  const [startError, setStartError] = useState('')
+
   const load = useCallback(async () => {
     try {
       const res = await fetch(`${apiUrl}${API_PREFIX}/evaluations/public/${linkId}`)
@@ -39,6 +48,65 @@ export default function PublicExam({ linkId, apiUrl }) {
     load()
   }, [load])
 
+  const startSession = useCallback(async () => {
+    setStartError('')
+    setSessionReady(false)
+    let stored =
+      typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(sessionKey(linkId)) : null
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const body = stored ? { session_token: stored } : {}
+        const res = await fetch(`${apiUrl}${API_PREFIX}/evaluations/public/${linkId}/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (res.status === 404 && stored && attempt === 0) {
+          sessionStorage.removeItem(sessionKey(linkId))
+          stored = null
+          continue
+        }
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.detail ?? 'Nu s-a putut porni sesiunea.')
+        }
+        const data = await res.json()
+        setSessionToken(data.session_token)
+        sessionStorage.setItem(sessionKey(linkId), data.session_token)
+        const total = Math.max(60, (data.duration_minutes || 30) * 60)
+        setTotalSeconds(total)
+        const sec = Math.min(data.seconds_remaining ?? 0, total)
+        setTimeRemaining(sec)
+        setTimerExpired(sec <= 0)
+        setSessionReady(true)
+        return
+      }
+    } catch (e) {
+      setStartError(e.message || 'Eroare la inițializare.')
+    }
+  }, [apiUrl, linkId])
+
+  useEffect(() => {
+    if (!evalData) return
+    startSession()
+  }, [evalData, startSession])
+
+  useEffect(() => {
+    if (!sessionReady || timerExpired) return
+    const id = setInterval(() => {
+      setTimeRemaining((prev) => {
+        if (prev == null || prev <= 0) {
+          setTimerExpired(true)
+          return 0
+        }
+        const next = prev - 1
+        if (next <= 0) setTimerExpired(true)
+        return next
+      })
+    }, 1000)
+    return () => clearInterval(id)
+  }, [sessionReady, timerExpired])
+
   const handleSubmitAnswer = async (questionId, answerText) => {
     const name = guestName.trim()
     if (!name) {
@@ -47,6 +115,10 @@ export default function PublicExam({ linkId, apiUrl }) {
     }
     if (!answerText?.trim()) {
       setSubmitError('Introdu un răspuns.')
+      return
+    }
+    if (!sessionToken || timerExpired || (timeRemaining != null && timeRemaining <= 0)) {
+      setSubmitError('Timpul a expirat; nu mai poți trimite răspunsuri.')
       return
     }
     setSubmitError('')
@@ -58,6 +130,7 @@ export default function PublicExam({ linkId, apiUrl }) {
         body: JSON.stringify({
           question_id: questionId,
           answer: answerText,
+          session_token: sessionToken,
           guest_name: name,
           guest_class: guestClass.trim(),
           mode: feedbackMode,
@@ -65,7 +138,12 @@ export default function PublicExam({ linkId, apiUrl }) {
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        throw new Error(err.detail ?? 'Eroare la trimitere')
+        const msg = err.detail ?? 'Eroare la trimitere'
+        if (res.status === 403 && String(msg).toLowerCase().includes('expirat')) {
+          setTimerExpired(true)
+          setTimeRemaining(0)
+        }
+        throw new Error(msg)
       }
       const data = await res.json()
       setFeedbackResults((prev) => ({
@@ -102,17 +180,60 @@ export default function PublicExam({ linkId, apiUrl }) {
     )
   }
 
+  if (startError) {
+    return (
+      <div className="public-exam-page">
+        <div className="public-exam-card">
+          <p className="error-msg">{startError}</p>
+          <button type="button" className="btn-primary" style={{ marginTop: '1rem' }} onClick={() => startSession()}>
+            Reîncearcă
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!sessionReady || sessionToken == null || timeRemaining == null) {
+    return (
+      <div className="public-exam-page">
+        <div className="public-exam-card">
+          <p className="text-muted">Se pregătește sesiunea și cronometrul...</p>
+        </div>
+      </div>
+    )
+  }
+
   const questions = evalData.questions || []
-  const canAnswer = guestName.trim().length > 0
+  const canAnswer = guestName.trim().length > 0 && !timerExpired && timeRemaining > 0
+  const timerBlock = timerExpired || timeRemaining <= 0
 
   return (
     <div className="public-exam-page">
       <div className="public-exam-header">
-        <h1>{evalData.title}</h1>
-        {evalData.subject && <p className="public-exam-subject">{evalData.subject}</p>}
-        {evalData.description && <p className="text-muted">{evalData.description}</p>}
-        <p className="text-muted">Durată indicativă: {evalData.duration} minute</p>
+        <div className="public-exam-header-row">
+          <div className="public-exam-header-text">
+            <h1>{evalData.title}</h1>
+            {evalData.subject && <p className="public-exam-subject">{evalData.subject}</p>}
+            {evalData.description && <p className="text-muted">{evalData.description}</p>}
+            <p className="text-muted public-exam-timer-hint">
+              Timp limită: {evalData.duration} minute (blochează trimiterea la expirare).
+            </p>
+          </div>
+          <div className="public-exam-timer-wrap">
+            <AnimeTimer
+              timeRemaining={timeRemaining}
+              totalDuration={totalSeconds}
+              timerExpired={timerExpired}
+            />
+          </div>
+        </div>
       </div>
+
+      {timerBlock && (
+        <div className="notification error public-exam-notice">
+          Timpul alocat evaluării a expirat. Nu mai poți trimite răspunsuri noi.
+        </div>
+      )}
 
       <div className="public-exam-card">
         <h3>Date participant</h3>
@@ -124,6 +245,7 @@ export default function PublicExam({ linkId, apiUrl }) {
             onChange={(e) => setGuestName(e.target.value)}
             placeholder="Ex: Ion Popescu"
             className="public-exam-input"
+            disabled={timerBlock}
           />
         </label>
         <label className="public-exam-label">
@@ -134,6 +256,7 @@ export default function PublicExam({ linkId, apiUrl }) {
             onChange={(e) => setGuestClass(e.target.value)}
             placeholder="Ex: 10A"
             className="public-exam-input"
+            disabled={timerBlock}
           />
         </label>
       </div>
@@ -144,7 +267,7 @@ export default function PublicExam({ linkId, apiUrl }) {
           value={feedbackMode}
           onChange={(e) => setFeedbackMode(e.target.value)}
           className="public-exam-input"
-          disabled={!canAnswer}
+          disabled={!canAnswer || timerBlock}
         >
           <option value="ai">AI</option>
           <option value="rule_based">Reguli simple</option>
@@ -155,7 +278,7 @@ export default function PublicExam({ linkId, apiUrl }) {
 
       {questions.map((q, idx) => {
         const fb = feedbackResults[q.id]
-        const isDisabled = !canAnswer || isGenerating || fb
+        const isDisabled = !canAnswer || isGenerating || fb || timerBlock
         return (
           <div className="public-exam-card question-card-public" key={q.id}>
             <h3>
@@ -247,7 +370,9 @@ export default function PublicExam({ linkId, apiUrl }) {
                 disabled={isDisabled}
                 onClick={() => handleSubmitAnswer(q.id, answers[q.id])}
               >
-                {isGenerating ? 'Se procesează...' : (
+                {isGenerating ? (
+                  'Se procesează...'
+                ) : (
                   <>
                     <Icons.Send /> Trimite răspunsul
                   </>

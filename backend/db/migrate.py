@@ -24,6 +24,30 @@ def _sync_migrate(sync_conn: Any) -> None:
             sync_conn.execute(text("ALTER TABLE responses ADD COLUMN guest_name VARCHAR(255)"))
         if "guest_class" not in resp_cols:
             sync_conn.execute(text("ALTER TABLE responses ADD COLUMN guest_class VARCHAR(100)"))
+    if not insp.has_table("public_evaluation_attempts"):
+        sync_conn.execute(
+            text(
+                """
+                CREATE TABLE public_evaluation_attempts (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    evaluation_id INTEGER NOT NULL,
+                    public_link_id VARCHAR(36) NOT NULL,
+                    session_token VARCHAR(36) NOT NULL,
+                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(evaluation_id) REFERENCES evaluations (id) ON DELETE CASCADE
+                )
+                """
+            )
+        )
+        sync_conn.execute(
+            text("CREATE UNIQUE INDEX ix_public_evaluation_attempts_session_token ON public_evaluation_attempts (session_token)")
+        )
+        sync_conn.execute(
+            text("CREATE INDEX ix_public_evaluation_attempts_public_link_id ON public_evaluation_attempts (public_link_id)")
+        )
+        sync_conn.execute(
+            text("CREATE INDEX ix_public_evaluation_attempts_evaluation_id ON public_evaluation_attempts (evaluation_id)")
+        )
 
 
 async def run_schema_migrations(conn: AsyncConnection) -> None:

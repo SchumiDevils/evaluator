@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,7 @@ from ..models import (
     EvaluationAttempt,
     EvaluationEnrollment,
     Feedback,
+    PublicEvaluationAttempt,
     Question,
     Response,
     User,
@@ -97,9 +98,20 @@ class PublicEvaluationRead(BaseModel):
     questions: List[QuestionRead]
 
 
+class PublicStartBody(BaseModel):
+    session_token: Optional[str] = Field(default=None, max_length=40)
+
+
+class PublicStartRead(BaseModel):
+    session_token: str
+    seconds_remaining: int
+    duration_minutes: int
+
+
 class PublicAnswerBody(BaseModel):
     question_id: int
     answer: str
+    session_token: str = Field(..., min_length=32, max_length=40)
     guest_name: str = Field(..., min_length=1, max_length=255)
     guest_class: str = Field(default="", max_length=100)
     mode: str = Field(default="rule_based", pattern="^(rule_based|ai|auto)$")
@@ -158,6 +170,17 @@ async def _student_enrolled(session: AsyncSession, user_id: int, evaluation_id: 
         )
     )
     return r.scalar_one_or_none() is not None
+
+
+def _public_seconds_remaining(started_at: datetime, duration_minutes: int) -> int:
+    """Seconds left for a public exam session (server clock)."""
+    mins = max(1, int(duration_minutes or 1))
+    total = mins * 60
+    now = datetime.now(timezone.utc)
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    elapsed = (now - started_at).total_seconds()
+    return max(0, int(total - elapsed))
 
 
 async def _build_evaluation_read(
@@ -268,6 +291,63 @@ async def join_evaluation_by_code(
     return await _build_evaluation_read(session, ev, include_access_secrets=False)
 
 
+@router.post("/public/{public_link_id}/start", response_model=PublicStartRead)
+async def start_public_evaluation_session(
+    public_link_id: str,
+    session: AsyncSession = Depends(get_session),
+    body: Optional[PublicStartBody] = Body(None),
+) -> PublicStartRead:
+    body = body or PublicStartBody()
+    result = await session.execute(
+        select(Evaluation).where(
+            Evaluation.public_link_id == public_link_id,
+            Evaluation.status == "active",
+        )
+    )
+    ev = result.scalar_one_or_none()
+    if not ev:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link invalid sau evaluare inactivă.")
+    duration_minutes = max(1, int(ev.duration or 1))
+
+    token_in = (body.session_token or "").strip() or None
+    if token_in:
+        att_r = await session.execute(
+            select(PublicEvaluationAttempt).where(
+                PublicEvaluationAttempt.session_token == token_in,
+                PublicEvaluationAttempt.public_link_id == public_link_id,
+                PublicEvaluationAttempt.evaluation_id == ev.id,
+            )
+        )
+        att = att_r.scalar_one_or_none()
+        if not att:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Sesiune invalidă sau expirată. Reîncarcă pagina pentru o sesiune nouă.",
+            )
+        sec = _public_seconds_remaining(att.started_at, duration_minutes)
+        return PublicStartRead(
+            session_token=att.session_token,
+            seconds_remaining=sec,
+            duration_minutes=duration_minutes,
+        )
+
+    new_token = str(uuid.uuid4())
+    att = PublicEvaluationAttempt(
+        evaluation_id=ev.id,
+        public_link_id=public_link_id,
+        session_token=new_token,
+    )
+    session.add(att)
+    await session.commit()
+    await session.refresh(att)
+    sec = _public_seconds_remaining(att.started_at, duration_minutes)
+    return PublicStartRead(
+        session_token=new_token,
+        seconds_remaining=sec,
+        duration_minutes=duration_minutes,
+    )
+
+
 @router.get("/public/{public_link_id}", response_model=PublicEvaluationRead)
 async def get_public_evaluation(
     public_link_id: str,
@@ -322,6 +402,25 @@ async def submit_public_answer(
     ev = result.scalar_one_or_none()
     if not ev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link invalid.")
+    duration_minutes = max(1, int(ev.duration or 1))
+    att_r = await session.execute(
+        select(PublicEvaluationAttempt).where(
+            PublicEvaluationAttempt.session_token == body.session_token.strip(),
+            PublicEvaluationAttempt.public_link_id == public_link_id,
+            PublicEvaluationAttempt.evaluation_id == ev.id,
+        )
+    )
+    attempt = att_r.scalar_one_or_none()
+    if not attempt:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sesiune invalidă. Reîncarcă pagina și începe din nou.",
+        )
+    if _public_seconds_remaining(attempt.started_at, duration_minutes) <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Timpul pentru această evaluare a expirat.",
+        )
     q_result = await session.execute(select(Question).where(Question.id == body.question_id))
     question = q_result.scalar_one_or_none()
     if not question or question.evaluation_id != ev.id:
