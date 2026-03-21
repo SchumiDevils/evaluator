@@ -33,6 +33,8 @@ class ResponseRead(BaseModel):
     mode: str
     user_id: Optional[int]
     user_name: Optional[str] = None
+    guest_name: Optional[str] = None
+    guest_class: Optional[str] = None
     created_at: datetime
     feedback: List[FeedbackItemSchema]
 

@@ -8,7 +8,7 @@ from sqlalchemy import case, cast, func, select, Float
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.session import get_session
-from ..models import Evaluation, Question, Response, User
+from ..models import Evaluation, EvaluationEnrollment, Question, Response, User
 from ..models.user import UserRole
 from .auth import get_current_user
 
@@ -57,8 +57,12 @@ async def get_analytics(
     is_student = current_user.role == UserRole.STUDENT
 
     if is_student:
-        eval_ids_q = (
-            select(Evaluation.id).where(Evaluation.status == "active")
+        subq = select(EvaluationEnrollment.evaluation_id).where(
+            EvaluationEnrollment.user_id == current_user.id
+        )
+        eval_ids_q = select(Evaluation.id).where(
+            Evaluation.status == "active",
+            Evaluation.id.in_(subq),
         )
     else:
         eval_ids_q = (

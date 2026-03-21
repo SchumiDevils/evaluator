@@ -18,11 +18,16 @@ class Evaluation(TimestampMixin, Base):
     duration: Mapped[int] = mapped_column(Integer, default=30)
     status: Mapped[str] = mapped_column(String(20), default="draft")
     author_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    access_code: Mapped[Optional[str]] = mapped_column(String(20), unique=True, index=True, nullable=True)
+    public_link_id: Mapped[Optional[str]] = mapped_column(String(36), unique=True, index=True, nullable=True)
 
     author: Mapped[Optional["User"]] = relationship(back_populates="evaluations")
     responses: Mapped[List["Response"]] = relationship(back_populates="evaluation", cascade="all, delete")
     questions: Mapped[List["Question"]] = relationship(
         back_populates="evaluation", cascade="all, delete-orphan", order_by="Question.order"
+    )
+    enrollments: Mapped[List["EvaluationEnrollment"]] = relationship(
+        back_populates="evaluation", cascade="all, delete-orphan"
     )
 
 

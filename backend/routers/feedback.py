@@ -5,7 +5,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.session import get_session
-from ..models import Evaluation, Question, User
+from ..models import Evaluation, EvaluationEnrollment, Question, User
+from ..models.user import UserRole
 from ..schemas.feedback import FeedbackResponse, ResponseCreate
 from ..services.feedback_service import generate_and_store_feedback
 from .auth import get_current_user
@@ -35,6 +36,18 @@ async def create_feedback(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Nu poți răspunde la propria evaluare.",
             )
+        if current_user.role == UserRole.STUDENT:
+            enr = await session.execute(
+                select(EvaluationEnrollment.id).where(
+                    EvaluationEnrollment.user_id == current_user.id,
+                    EvaluationEnrollment.evaluation_id == payload.evaluation_id,
+                )
+            )
+            if enr.scalar_one_or_none() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Nu ești înscris la această evaluare.",
+                )
 
     if payload.question_id:
         q_result = await session.execute(

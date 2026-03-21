@@ -4,8 +4,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import get_settings
-from .db.session import engine
-from .models import Base
+from .db.migrate import backfill_evaluation_access_and_enrollments, run_schema_migrations
+from .db.session import async_session_maker, engine
+from .models import Base  # noqa: F401 — triggers model registration
 from .routers import analytics, auth, evaluations, feedback
 
 settings = get_settings()
@@ -25,6 +26,10 @@ app.add_middleware(
 async def on_startup() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await run_schema_migrations(conn)
+    async with async_session_maker() as session:
+        await backfill_evaluation_access_and_enrollments(session)
+        await session.commit()
 
 
 @app.get("/health")

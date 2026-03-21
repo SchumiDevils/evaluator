@@ -16,6 +16,8 @@ class Response(TimestampMixin, Base):
     evaluation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("evaluations.id", ondelete="SET NULL"))
     question_id: Mapped[Optional[int]] = mapped_column(ForeignKey("questions.id", ondelete="SET NULL"))
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    guest_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    guest_class: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     token_usage: Mapped[Optional[int]] = mapped_column(Integer)
     mode: Mapped[str] = mapped_column(String(32), default="rule_based")

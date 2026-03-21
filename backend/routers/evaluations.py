@@ -1,22 +1,34 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..db.migrate import generate_access_code
 from ..db.session import get_session
-from ..models import Evaluation, EvaluationAttempt, Feedback, Question, Response, User
+from ..models import (
+    Evaluation,
+    EvaluationAttempt,
+    EvaluationEnrollment,
+    Feedback,
+    Question,
+    Response,
+    User,
+)
 from ..models.user import UserRole
 from ..schemas.feedback import (
     FeedbackItemSchema,
+    FeedbackResponse,
     ProfessorFeedbackUpdate,
     ResponseRead,
 )
+from ..services.feedback_service import generate_and_store_feedback
 from .auth import get_current_user
 
 router = APIRouter(prefix="/evaluations", tags=["evaluations"])
@@ -61,9 +73,36 @@ class EvaluationRead(BaseModel):
     questions: List[QuestionRead] = []
     author_id: Optional[int] = None
     author_name: Optional[str] = None
+    access_code: Optional[str] = None
+    public_link_id: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+
+class JoinByCodeBody(BaseModel):
+    code: str = Field(..., min_length=4, max_length=20)
+
+
+class PublicLinkBody(BaseModel):
+    enabled: bool
+
+
+class PublicEvaluationRead(BaseModel):
+    id: int
+    title: str
+    subject: Optional[str]
+    description: Optional[str]
+    duration: int
+    questions: List[QuestionRead]
+
+
+class PublicAnswerBody(BaseModel):
+    question_id: int
+    answer: str
+    guest_name: str = Field(..., min_length=1, max_length=255)
+    guest_class: str = Field(default="", max_length=100)
+    mode: str = Field(default="rule_based", pattern="^(rule_based|ai|auto)$")
 
 
 class StatsRead(BaseModel):
@@ -97,7 +136,33 @@ class MyResponseRead(BaseModel):
 
 # --- Helpers ---
 
-async def _build_evaluation_read(session: AsyncSession, ev: Evaluation) -> EvaluationRead:
+
+async def _ensure_access_code(session: AsyncSession, ev: Evaluation) -> None:
+    if ev.access_code:
+        return
+    for _ in range(30):
+        code = generate_access_code()
+        exists = await session.execute(select(Evaluation.id).where(Evaluation.access_code == code))
+        if exists.scalar_one_or_none() is None:
+            ev.access_code = code
+            await session.flush()
+            return
+    raise HTTPException(status_code=500, detail="Nu s-a putut genera codul de acces.")
+
+
+async def _student_enrolled(session: AsyncSession, user_id: int, evaluation_id: int) -> bool:
+    r = await session.execute(
+        select(EvaluationEnrollment.id).where(
+            EvaluationEnrollment.user_id == user_id,
+            EvaluationEnrollment.evaluation_id == evaluation_id,
+        )
+    )
+    return r.scalar_one_or_none() is not None
+
+
+async def _build_evaluation_read(
+    session: AsyncSession, ev: Evaluation, *, include_access_secrets: bool = False
+) -> EvaluationRead:
     count_result = await session.execute(
         select(func.count(Response.id)).where(Response.evaluation_id == ev.id)
     )
@@ -118,6 +183,8 @@ async def _build_evaluation_read(session: AsyncSession, ev: Evaluation) -> Evalu
         response_count=response_count,
         author_id=ev.author_id,
         author_name=author_name,
+        access_code=ev.access_code if include_access_secrets else None,
+        public_link_id=ev.public_link_id if include_access_secrets else None,
         questions=[
             QuestionRead(
                 id=q.id,
@@ -168,15 +235,125 @@ async def _sync_questions(session: AsyncSession, evaluation: Evaluation, questio
 
 # --- Routes ---
 
+
+@router.post("/join", response_model=EvaluationRead)
+async def join_evaluation_by_code(
+    body: JoinByCodeBody,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> EvaluationRead:
+    if current_user.role != UserRole.STUDENT:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Doar studenții pot folosi codul.")
+    code = body.code.strip().upper()
+    result = await session.execute(
+        select(Evaluation)
+        .where(Evaluation.access_code == code, Evaluation.status == "active")
+        .options(selectinload(Evaluation.questions))
+    )
+    ev = result.scalar_one_or_none()
+    if not ev:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cod invalid sau evaluare inactivă.")
+    existing = await session.execute(
+        select(EvaluationEnrollment.id).where(
+            EvaluationEnrollment.user_id == current_user.id,
+            EvaluationEnrollment.evaluation_id == ev.id,
+        )
+    )
+    if existing.scalar_one_or_none() is None:
+        session.add(
+            EvaluationEnrollment(user_id=current_user.id, evaluation_id=ev.id)
+        )
+        await session.commit()
+        await session.refresh(ev)
+    return await _build_evaluation_read(session, ev, include_access_secrets=False)
+
+
+@router.get("/public/{public_link_id}", response_model=PublicEvaluationRead)
+async def get_public_evaluation(
+    public_link_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> PublicEvaluationRead:
+    result = await session.execute(
+        select(Evaluation)
+        .where(
+            Evaluation.public_link_id == public_link_id,
+            Evaluation.status == "active",
+        )
+        .options(selectinload(Evaluation.questions))
+    )
+    ev = result.scalar_one_or_none()
+    if not ev:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link invalid sau evaluare inactivă.")
+    return PublicEvaluationRead(
+        id=ev.id,
+        title=ev.title,
+        subject=ev.subject,
+        description=ev.description,
+        duration=ev.duration,
+        questions=[
+            QuestionRead(
+                id=q.id,
+                order=q.order,
+                question_type=q.question_type,
+                text=q.text,
+                options=q.options,
+                correct_answer=None,
+                points=q.points,
+            )
+            for q in sorted(ev.questions, key=lambda q: q.order)
+        ],
+    )
+
+
+@router.post("/public/{public_link_id}/answer", response_model=dict)
+async def submit_public_answer(
+    public_link_id: str,
+    body: PublicAnswerBody,
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.execute(
+        select(Evaluation)
+        .where(
+            Evaluation.public_link_id == public_link_id,
+            Evaluation.status == "active",
+        )
+        .options(selectinload(Evaluation.questions))
+    )
+    ev = result.scalar_one_or_none()
+    if not ev:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link invalid.")
+    q_result = await session.execute(select(Question).where(Question.id == body.question_id))
+    question = q_result.scalar_one_or_none()
+    if not question or question.evaluation_id != ev.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Întrebare invalidă.")
+    try:
+        return await generate_and_store_feedback(
+            session,
+            answer=body.answer,
+            mode=body.mode,
+            evaluation_id=ev.id,
+            question_id=body.question_id,
+            question=question,
+            user=None,
+            guest_name=body.guest_name.strip(),
+            guest_class=body.guest_class.strip() or None,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+
+
 @router.get("/", response_model=EvaluationsListResponse)
 async def list_evaluations(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> EvaluationsListResponse:
     if current_user.role == UserRole.STUDENT:
+        subq = select(EvaluationEnrollment.evaluation_id).where(
+            EvaluationEnrollment.user_id == current_user.id
+        )
         query = (
             select(Evaluation)
-            .where(Evaluation.status == "active")
+            .where(Evaluation.status == "active", Evaluation.id.in_(subq))
             .options(selectinload(Evaluation.questions))
             .order_by(Evaluation.created_at.desc())
         )
@@ -193,7 +370,11 @@ async def list_evaluations(
 
     eval_list = []
     for ev in evaluations:
-        eval_list.append(await _build_evaluation_read(session, ev))
+        if current_user.role == UserRole.STUDENT:
+            eval_list.append(await _build_evaluation_read(session, ev, include_access_secrets=False))
+        else:
+            await _ensure_access_code(session, ev)
+            eval_list.append(await _build_evaluation_read(session, ev, include_access_secrets=True))
 
     total = len(eval_list)
     active = sum(1 for e in eval_list if e.status == "active")
@@ -254,6 +435,9 @@ async def list_evaluations(
             avg_score = round(score_sum * 100 / total_points) if total_points > 0 else 0
         else:
             avg_score = 0
+
+    if current_user.role != UserRole.STUDENT:
+        await session.commit()
 
     return EvaluationsListResponse(
         evaluations=eval_list,
@@ -320,6 +504,13 @@ async def start_evaluation(
     if not evaluation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluarea nu a fost găsită.")
 
+    if current_user.role == UserRole.STUDENT:
+        if not await _student_enrolled(session, current_user.id, evaluation_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Nu ești înscris la această evaluare. Folosește codul de acces.",
+            )
+
     result = await session.execute(
         select(EvaluationAttempt).where(
             EvaluationAttempt.user_id == current_user.id,
@@ -344,6 +535,169 @@ async def start_evaluation(
     remaining = max(0, int(total - elapsed))
 
     return AttemptRead(started_at=started, seconds_remaining=remaining)
+
+
+# Sub-routes with extra path segments MUST be registered before GET /{evaluation_id}
+# so proxies and Starlette routing resolve them reliably.
+
+
+@router.post("/{evaluation_id}/regenerate-access-code", response_model=EvaluationRead)
+async def regenerate_access_code(
+    evaluation_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> EvaluationRead:
+    result = await session.execute(
+        select(Evaluation)
+        .where(Evaluation.id == evaluation_id, Evaluation.author_id == current_user.id)
+        .options(selectinload(Evaluation.questions))
+    )
+    evaluation = result.scalar_one_or_none()
+    if not evaluation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
+    for _ in range(30):
+        code = generate_access_code()
+        exists = await session.execute(
+            select(Evaluation.id).where(Evaluation.access_code == code, Evaluation.id != evaluation.id)
+        )
+        if exists.scalar_one_or_none() is None:
+            evaluation.access_code = code
+            break
+    await session.commit()
+    return await _build_evaluation_read(session, evaluation, include_access_secrets=True)
+
+
+@router.put("/{evaluation_id}/public-link", response_model=EvaluationRead)
+async def toggle_public_link(
+    evaluation_id: int,
+    body: PublicLinkBody,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> EvaluationRead:
+    result = await session.execute(
+        select(Evaluation)
+        .where(Evaluation.id == evaluation_id, Evaluation.author_id == current_user.id)
+        .options(selectinload(Evaluation.questions))
+    )
+    evaluation = result.scalar_one_or_none()
+    if not evaluation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
+    await _ensure_access_code(session, evaluation)
+    if body.enabled:
+        if not evaluation.public_link_id:
+            evaluation.public_link_id = str(uuid.uuid4())
+    else:
+        evaluation.public_link_id = None
+    await session.commit()
+    return await _build_evaluation_read(session, evaluation, include_access_secrets=True)
+
+
+@router.get("/{evaluation_id}/responses", response_model=List[ResponseRead])
+async def list_evaluation_responses(
+    evaluation_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> List[ResponseRead]:
+    ev_result = await session.execute(
+        select(Evaluation).where(
+            Evaluation.id == evaluation_id, Evaluation.author_id == current_user.id
+        )
+    )
+    if not ev_result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
+
+    result = await session.execute(
+        select(Response)
+        .where(Response.evaluation_id == evaluation_id)
+        .options(selectinload(Response.feedback_items), selectinload(Response.author))
+        .order_by(Response.created_at.desc())
+    )
+    responses = result.scalars().all()
+
+    def _display_name(resp: Response) -> Optional[str]:
+        if resp.author and resp.author.full_name:
+            return resp.author.full_name
+        if resp.guest_name:
+            return f"{resp.guest_name}" + (f" ({resp.guest_class})" if resp.guest_class else "") + " [Guest]"
+        return None
+
+    return [
+        ResponseRead(
+            id=r.id,
+            answer_text=r.answer_text,
+            evaluation_id=r.evaluation_id,
+            question_id=r.question_id,
+            score=r.score,
+            mode=r.mode,
+            user_id=r.user_id,
+            user_name=_display_name(r),
+            guest_name=r.guest_name,
+            guest_class=r.guest_class,
+            created_at=r.created_at,
+            feedback=[
+                FeedbackItemSchema(
+                    category=fb.category, message=fb.message, source=fb.source
+                )
+                for fb in r.feedback_items
+            ],
+        )
+        for r in responses
+    ]
+
+
+@router.get("/{evaluation_id}/my-responses", response_model=List[ResponseRead])
+async def list_my_evaluation_responses(
+    evaluation_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> List[ResponseRead]:
+    ev_result = await session.execute(
+        select(Evaluation).where(Evaluation.id == evaluation_id)
+    )
+    evaluation = ev_result.scalar_one_or_none()
+    if not evaluation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
+
+    if current_user.role == UserRole.STUDENT and evaluation.status != "active":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
+
+    if current_user.role == UserRole.STUDENT:
+        if not await _student_enrolled(session, current_user.id, evaluation_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Nu ești înscris la această evaluare.",
+            )
+
+    result = await session.execute(
+        select(Response)
+        .where(Response.evaluation_id == evaluation_id, Response.user_id == current_user.id)
+        .options(selectinload(Response.feedback_items), selectinload(Response.author))
+        .order_by(Response.created_at.desc())
+    )
+    responses = result.scalars().all()
+
+    return [
+        ResponseRead(
+            id=r.id,
+            answer_text=r.answer_text,
+            evaluation_id=r.evaluation_id,
+            question_id=r.question_id,
+            score=r.score,
+            mode=r.mode,
+            user_id=r.user_id,
+            user_name=r.author.full_name if r.author else None,
+            guest_name=r.guest_name,
+            guest_class=r.guest_class,
+            created_at=r.created_at,
+            feedback=[
+                FeedbackItemSchema(
+                    category=fb.category, message=fb.message, source=fb.source
+                )
+                for fb in r.feedback_items
+            ],
+        )
+        for r in responses
+    ]
 
 
 @router.post("/", response_model=EvaluationRead, status_code=status.HTTP_201_CREATED)
@@ -377,13 +731,14 @@ async def create_evaluation(
                 )
             )
 
+    await _ensure_access_code(session, evaluation)
     await session.commit()
 
     result = await session.execute(
         select(Evaluation).where(Evaluation.id == evaluation.id).options(selectinload(Evaluation.questions))
     )
     evaluation = result.scalar_one()
-    return await _build_evaluation_read(session, evaluation)
+    return await _build_evaluation_read(session, evaluation, include_access_secrets=True)
 
 
 @router.get("/{evaluation_id}", response_model=EvaluationRead)
@@ -405,7 +760,19 @@ async def get_evaluation(
     evaluation = result.scalar_one_or_none()
     if not evaluation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
-    return await _build_evaluation_read(session, evaluation)
+    if current_user.role == UserRole.STUDENT:
+        if not await _student_enrolled(session, current_user.id, evaluation_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Nu ești înscris la această evaluare.",
+            )
+    include_secrets = (
+        current_user.role != UserRole.STUDENT and evaluation.author_id == current_user.id
+    )
+    if include_secrets:
+        await _ensure_access_code(session, evaluation)
+        await session.commit()
+    return await _build_evaluation_read(session, evaluation, include_access_secrets=include_secrets)
 
 
 @router.put("/{evaluation_id}", response_model=EvaluationRead)
@@ -439,7 +806,9 @@ async def update_evaluation(
         select(Evaluation).where(Evaluation.id == evaluation.id).options(selectinload(Evaluation.questions))
     )
     evaluation = result.scalar_one()
-    return await _build_evaluation_read(session, evaluation)
+    await _ensure_access_code(session, evaluation)
+    await session.commit()
+    return await _build_evaluation_read(session, evaluation, include_access_secrets=True)
 
 
 @router.delete("/{evaluation_id}")
@@ -458,99 +827,6 @@ async def delete_evaluation(
     await session.delete(evaluation)
     await session.commit()
     return {"deleted": True}
-
-
-# --- Student responses for professor ---
-
-@router.get("/{evaluation_id}/responses", response_model=List[ResponseRead])
-async def list_evaluation_responses(
-    evaluation_id: int,
-    session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-) -> List[ResponseRead]:
-    ev_result = await session.execute(
-        select(Evaluation).where(
-            Evaluation.id == evaluation_id, Evaluation.author_id == current_user.id
-        )
-    )
-    if not ev_result.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
-
-    result = await session.execute(
-        select(Response)
-        .where(Response.evaluation_id == evaluation_id)
-        .options(selectinload(Response.feedback_items), selectinload(Response.author))
-        .order_by(Response.created_at.desc())
-    )
-    responses = result.scalars().all()
-
-    return [
-        ResponseRead(
-            id=r.id,
-            answer_text=r.answer_text,
-            evaluation_id=r.evaluation_id,
-            question_id=r.question_id,
-            score=r.score,
-            mode=r.mode,
-            user_id=r.user_id,
-            user_name=r.author.full_name if r.author else None,
-            created_at=r.created_at,
-            feedback=[
-                FeedbackItemSchema(
-                    category=fb.category, message=fb.message, source=fb.source
-                )
-                for fb in r.feedback_items
-            ],
-        )
-        for r in responses
-    ]
-
-
-@router.get("/{evaluation_id}/my-responses", response_model=List[ResponseRead])
-async def list_my_evaluation_responses(
-    evaluation_id: int,
-    session: AsyncSession = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-) -> List[ResponseRead]:
-    ev_result = await session.execute(
-        select(Evaluation).where(Evaluation.id == evaluation_id)
-    )
-    evaluation = ev_result.scalar_one_or_none()
-    if not evaluation:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
-
-    # Students can only access active evaluations; professors can inspect their own submissions if any.
-    if current_user.role == UserRole.STUDENT and evaluation.status != "active":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
-
-    result = await session.execute(
-        select(Response)
-        .where(Response.evaluation_id == evaluation_id, Response.user_id == current_user.id)
-        .options(selectinload(Response.feedback_items), selectinload(Response.author))
-        .order_by(Response.created_at.desc())
-    )
-    responses = result.scalars().all()
-
-    return [
-        ResponseRead(
-            id=r.id,
-            answer_text=r.answer_text,
-            evaluation_id=r.evaluation_id,
-            question_id=r.question_id,
-            score=r.score,
-            mode=r.mode,
-            user_id=r.user_id,
-            user_name=r.author.full_name if r.author else None,
-            created_at=r.created_at,
-            feedback=[
-                FeedbackItemSchema(
-                    category=fb.category, message=fb.message, source=fb.source
-                )
-                for fb in r.feedback_items
-            ],
-        )
-        for r in responses
-    ]
 
 
 @router.put("/responses/{response_id}/feedback")

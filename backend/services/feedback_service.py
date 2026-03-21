@@ -69,6 +69,8 @@ async def generate_and_store_feedback(
     question_id: Optional[int] = None,
     question: Optional[Question] = None,
     user: Optional[User] = None,
+    guest_name: Optional[str] = None,
+    guest_class: Optional[str] = None,
     rubric: Optional[Iterable[str]] = None,
 ) -> FeedbackResponse:
     is_correct: Optional[bool] = None
@@ -88,6 +90,8 @@ async def generate_and_store_feedback(
         evaluation_id=evaluation_id,
         question_id=question_id,
         user_id=user.id if user else None,
+        guest_name=guest_name,
+        guest_class=guest_class,
         mode=mode,
     )
     session.add(response)
