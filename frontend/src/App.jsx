@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import Silk from './components/Silk'
 import { ParticleCard, GlobalSpotlight, useMobileDetection } from './components/MagicBento'
 import rubrixLogo from './assets/rubrix-logo.svg'
+import PublicExam from './PublicExam.jsx'
 import './App.css'
 
 function RubrixDrawTitle() {
@@ -321,7 +322,14 @@ const Icons = {
 
 const initialAuthState = { email: '', password: '', fullName: '', role: 'student' }
 
+function parsePublicLinkFromPath() {
+  if (typeof window === 'undefined') return null
+  const m = window.location.pathname.match(/^\/public\/([a-f0-9-]{36})\/?$/i)
+  return m ? m[1] : null
+}
+
 function App() {
+  const [publicLinkId] = useState(parsePublicLinkFromPath)
   const [token, setToken] = useState(() => localStorage.getItem('auth_token') ?? '')
   const [user, setUser] = useState(null)
   const [view, setView] = useState('dashboard')
@@ -366,6 +374,8 @@ function App() {
   const [detailTab, setDetailTab] = useState('questions')
   const [reevalForm, setReevalForm] = useState({})
   const [expandedStudents, setExpandedStudents] = useState({})
+  const [joinCode, setJoinCode] = useState('')
+  const [isJoining, setIsJoining] = useState(false)
 
   // Timer state
   const [timeRemaining, setTimeRemaining] = useState(null)
@@ -959,6 +969,91 @@ function App() {
     setView('my-responses')
   }
 
+  const handleJoinByCode = async () => {
+    const code = joinCode.trim().toUpperCase()
+    if (!code) {
+      setError('Introdu un cod de acces.')
+      return
+    }
+    setIsJoining(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/join`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ code }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail ?? 'Cod invalid.')
+      }
+      setJoinCode('')
+      setSuccess('Te-ai înscris la evaluare! O găsești mai jos.')
+      await fetchAssessments()
+    } catch (e) {
+      setError(e.message || 'Nu s-a putut folosi codul.')
+    } finally {
+      setIsJoining(false)
+    }
+  }
+
+  const handleRegenerateAccessCode = async () => {
+    if (!selectedAssessment?.id) return
+    try {
+      const res = await fetch(
+        `${API_URL}${API_PREFIX}/evaluations/${selectedAssessment.id}/regenerate-access-code`,
+        { method: 'POST', headers: { Authorization: `Bearer ${token}` } }
+      )
+      if (res.ok) {
+        setSelectedAssessment(await res.json())
+        setSuccess('Codul de acces a fost regenerat.')
+      } else {
+        const err = await res.json().catch(() => ({}))
+        setError(err.detail ?? 'Eroare')
+      }
+    } catch {
+      setError('Eroare la regenerare.')
+    }
+  }
+
+  const handleTogglePublicLink = async (enabled) => {
+    if (!selectedAssessment?.id) return
+    try {
+      const res = await fetch(
+        `${API_URL}${API_PREFIX}/evaluations/${selectedAssessment.id}/public-link`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ enabled }),
+        }
+      )
+      if (res.ok) {
+        setSelectedAssessment(await res.json())
+        setSuccess(enabled ? 'Link public activat.' : 'Link public dezactivat.')
+      } else {
+        const err = await res.json().catch(() => ({}))
+        setError(err.detail ?? 'Eroare')
+      }
+    } catch {
+      setError('Eroare.')
+    }
+  }
+
+  const copyToClipboard = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setSuccess('Copiat în clipboard.')
+    } catch {
+      setError('Nu s-a putut copia.')
+    }
+  }
+
   const handleReevaluate = async (responseId) => {
     const form = reevalForm[responseId]
     if (!form?.score && !form?.feedback_message) return
@@ -1007,6 +1102,10 @@ function App() {
   })
 
   const isAuthenticated = Boolean(token && user)
+
+  if (publicLinkId) {
+    return <PublicExam linkId={publicLinkId} apiUrl={API_URL} />
+  }
 
   // Auth screen
   if (!isAuthenticated) {
@@ -1155,8 +1254,11 @@ function App() {
     const allQuestionsSubmitted = totalQuestions > 0 && submittedQuestionsCount >= totalQuestions
 
     const groupedByStudent = studentResponses.reduce((acc, r) => {
-      const key = r.user_id || 'unknown'
-      if (!acc[key]) acc[key] = { name: r.user_name || 'Student necunoscut', responses: [] }
+      const key =
+        r.user_id != null
+          ? `u-${r.user_id}`
+          : `g-${(r.guest_name || '').trim()}|${(r.guest_class || '').trim()}`
+      if (!acc[key]) acc[key] = { name: r.user_name || r.guest_name || 'Participant', responses: [] }
       acc[key].responses.push(r)
       return acc
     }, {})
@@ -1262,6 +1364,47 @@ function App() {
                     </div>
                   )}
                 </ParticleCard>
+                {isOwner && (
+                  <ParticleCard className="info-card magic-bento-card magic-bento-card--border-glow access-card" disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+                    <h3>Acces studenți</h3>
+                    <p className="text-muted access-card-hint">Distribuie codul sau link-ul public. Studenții cu cont introduc codul pe dashboard.</p>
+                    <div className="access-code-row">
+                      <span className="access-code-value">{selectedAssessment.access_code || '—'}</span>
+                      <button type="button" className="btn-secondary btn-sm" onClick={() => selectedAssessment.access_code && copyToClipboard(selectedAssessment.access_code)}>
+                        Copiază cod
+                      </button>
+                      <button type="button" className="btn-secondary btn-sm" onClick={handleRegenerateAccessCode}>
+                        Cod nou
+                      </button>
+                    </div>
+                    <div className="public-link-row">
+                      <label className="public-link-toggle">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(selectedAssessment.public_link_id)}
+                          onChange={(e) => handleTogglePublicLink(e.target.checked)}
+                        />
+                        <span>Link public (fără cont)</span>
+                      </label>
+                      {selectedAssessment.public_link_id && (
+                        <div className="public-url-box">
+                          <code className="public-url-text">
+                            {`${window.location.origin}/public/${selectedAssessment.public_link_id}`}
+                          </code>
+                          <button
+                            type="button"
+                            className="btn-secondary btn-sm"
+                            onClick={() =>
+                              copyToClipboard(`${window.location.origin}/public/${selectedAssessment.public_link_id}`)
+                            }
+                          >
+                            Copiază link
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </ParticleCard>
+                )}
               </div>
 
               <div className="detail-questions">
@@ -2066,6 +2209,28 @@ function App() {
                 <Icons.Trend />
               </div>
             </ParticleCard>
+          </div>
+        )}
+
+        {!isProfessor && (
+          <div className="join-code-bar">
+            <div className="join-code-inner">
+              <span className="join-code-label">Intră cu codul de la profesor</span>
+              <div className="join-code-row">
+                <input
+                  type="text"
+                  className="join-code-input"
+                  placeholder="ex: ABC12XYZ"
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  maxLength={20}
+                />
+                <button type="button" className="btn-primary" onClick={handleJoinByCode} disabled={isJoining}>
+                  {isJoining ? 'Se verifică...' : 'Înscrie-te'}
+                </button>
+              </div>
+              <p className="text-muted join-code-hint">După înscriere, evaluarea apare în lista de mai jos.</p>
+            </div>
           </div>
         )}
 
