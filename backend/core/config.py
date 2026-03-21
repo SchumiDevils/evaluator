@@ -31,7 +31,18 @@ class Settings(BaseSettings):
     huggingface_model: Optional[str] = None
     huggingface_task: Literal["text-classification", "text-generation"] = "text-generation"
 
-    allow_origins: list[str] = ["http://localhost:5173"]
+    # Explicit origins (JSON array in env: ALLOW_ORIGINS='["http://localhost:5173"]')
+    allow_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+    )
+    # Matches any https://*.vercel.app (production + preview deploys)
+    allow_origin_regex: Optional[str] = Field(
+        default=r"^https://[a-zA-Z0-9\-]+\.vercel\.app$",
+        description="Regex for extra allowed origins (Vercel frontends).",
+    )
 
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
 

@@ -13,13 +13,16 @@ settings = get_settings()
 
 app = FastAPI(title=settings.app_name, version="0.2.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allow_origins or ["*"],
+_cors = dict(
+    allow_origins=settings.allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+if settings.allow_origin_regex:
+    _cors["allow_origin_regex"] = settings.allow_origin_regex
+
+app.add_middleware(CORSMiddleware, **_cors)
 
 
 @app.on_event("startup")

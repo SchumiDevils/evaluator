@@ -305,12 +305,12 @@ async def get_public_evaluation(
     )
 
 
-@router.post("/public/{public_link_id}/answer", response_model=dict)
+@router.post("/public/{public_link_id}/answer", response_model=FeedbackResponse)
 async def submit_public_answer(
     public_link_id: str,
     body: PublicAnswerBody,
     session: AsyncSession = Depends(get_session),
-):
+) -> FeedbackResponse:
     result = await session.execute(
         select(Evaluation)
         .where(
