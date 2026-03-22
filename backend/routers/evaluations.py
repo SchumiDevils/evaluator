@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -107,6 +107,7 @@ class PublicStartRead(BaseModel):
     session_token: str
     seconds_remaining: int
     duration_minutes: int
+    questions: List[QuestionRead]
 
 
 class PublicAnswerBody(BaseModel):
@@ -148,6 +149,58 @@ class MyResponseRead(BaseModel):
 
 
 # --- Helpers ---
+
+
+def _fnv1a32(seed_str: str) -> int:
+    """FNV-1a 32-bit — același algoritm ca pe frontend pentru seed determinist."""
+    h = 2166136261
+    for byte in seed_str.encode("utf-8"):
+        h ^= byte
+        h = (h * 16777619) & 0xFFFFFFFF
+    return h
+
+
+def _deterministic_shuffle(items: List[Any], seed_str: str) -> List[Any]:
+    """Fisher–Yates cu Mulberry32 (compatibil cu frontend)."""
+    state = _fnv1a32(seed_str)
+    out = list(items)
+
+    def rand() -> float:
+        nonlocal state
+        state = (state + 0x6D2B79F5) & 0xFFFFFFFF
+        t = state
+        t = ((t ^ (t >> 15)) * (t | 1)) & 0xFFFFFFFF
+        t = (t ^ (t + ((t ^ (t >> 7)) * (t | 61)))) & 0xFFFFFFFF
+        return ((t ^ (t >> 14)) & 0xFFFFFFFF) / 4294967296.0
+
+    for i in range(len(out) - 1, 0, -1):
+        j = min(i, int(rand() * (i + 1)))
+        out[i], out[j] = out[j], out[i]
+    return out
+
+
+def _shuffle_evaluation_questions_for_student(read: EvaluationRead, user_id: int) -> EvaluationRead:
+    seed_str = f"student:{user_id}:{read.id}"
+    shuffled = _deterministic_shuffle(list(read.questions), seed_str)
+    return read.model_copy(update={"questions": shuffled})
+
+
+def _public_shuffled_question_reads(ev: Evaluation, session_token: str) -> List[QuestionRead]:
+    seed_str = f"guest:{session_token}:{ev.id}"
+    ordered = sorted(ev.questions, key=lambda q: q.order)
+    items = [
+        QuestionRead(
+            id=q.id,
+            order=q.order,
+            question_type=q.question_type,
+            text=q.text,
+            options=q.options,
+            correct_answer=None,
+            points=q.points,
+        )
+        for q in ordered
+    ]
+    return _deterministic_shuffle(items, seed_str)
 
 
 async def _ensure_access_code(session: AsyncSession, ev: Evaluation) -> None:
@@ -301,7 +354,8 @@ async def join_evaluation_by_code(
         )
         await session.commit()
         await session.refresh(ev)
-    return await _build_evaluation_read(session, ev, include_access_secrets=False)
+    read = await _build_evaluation_read(session, ev, include_access_secrets=False)
+    return _shuffle_evaluation_questions_for_student(read, current_user.id)
 
 
 @router.post("/public/{public_link_id}/start", response_model=PublicStartRead)
@@ -312,10 +366,12 @@ async def start_public_evaluation_session(
 ) -> PublicStartRead:
     body = body or PublicStartBody()
     result = await session.execute(
-        select(Evaluation).where(
+        select(Evaluation)
+        .where(
             Evaluation.public_link_id == public_link_id,
             Evaluation.status == "active",
         )
+        .options(selectinload(Evaluation.questions))
     )
     ev = result.scalar_one_or_none()
     if not ev:
@@ -338,10 +394,12 @@ async def start_public_evaluation_session(
                 detail="Sesiune invalidă sau expirată. Reîncarcă pagina pentru o sesiune nouă.",
             )
         sec = _public_seconds_remaining(att.started_at, duration_minutes)
+        qs = _public_shuffled_question_reads(ev, att.session_token)
         return PublicStartRead(
             session_token=att.session_token,
             seconds_remaining=sec,
             duration_minutes=duration_minutes,
+            questions=qs,
         )
 
     new_token = str(uuid.uuid4())
@@ -354,10 +412,12 @@ async def start_public_evaluation_session(
     await session.commit()
     await session.refresh(att)
     sec = _public_seconds_remaining(att.started_at, duration_minutes)
+    qs = _public_shuffled_question_reads(ev, att.session_token)
     return PublicStartRead(
         session_token=new_token,
         seconds_remaining=sec,
         duration_minutes=duration_minutes,
+        questions=qs,
     )
 
 
@@ -367,34 +427,23 @@ async def get_public_evaluation(
     session: AsyncSession = Depends(get_session),
 ) -> PublicEvaluationRead:
     result = await session.execute(
-        select(Evaluation)
-        .where(
+        select(Evaluation).where(
             Evaluation.public_link_id == public_link_id,
             Evaluation.status == "active",
         )
-        .options(selectinload(Evaluation.questions))
     )
     ev = result.scalar_one_or_none()
     if not ev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link invalid sau evaluare inactivă.")
+    # Întrebările nu sunt incluse aici — ordinea și conținutul se dau doar la /start (per sesiune),
+    # ca să nu poată fi citite înainte de începerea examenului.
     return PublicEvaluationRead(
         id=ev.id,
         title=ev.title,
         subject=ev.subject,
         description=ev.description,
         duration=ev.duration,
-        questions=[
-            QuestionRead(
-                id=q.id,
-                order=q.order,
-                question_type=q.question_type,
-                text=q.text,
-                options=q.options,
-                correct_answer=None,
-                points=q.points,
-            )
-            for q in sorted(ev.questions, key=lambda q: q.order)
-        ],
+        questions=[],
     )
 
 
@@ -515,7 +564,8 @@ async def list_evaluations(
     eval_list = []
     for ev in evaluations:
         if current_user.role == UserRole.STUDENT:
-            eval_list.append(await _build_evaluation_read(session, ev, include_access_secrets=False))
+            built = await _build_evaluation_read(session, ev, include_access_secrets=False)
+            eval_list.append(_shuffle_evaluation_questions_for_student(built, current_user.id))
         else:
             await _ensure_access_code(session, ev)
             eval_list.append(await _build_evaluation_read(session, ev, include_access_secrets=True))
@@ -916,7 +966,10 @@ async def get_evaluation(
     if include_secrets:
         await _ensure_access_code(session, evaluation)
         await session.commit()
-    return await _build_evaluation_read(session, evaluation, include_access_secrets=include_secrets)
+    read = await _build_evaluation_read(session, evaluation, include_access_secrets=include_secrets)
+    if current_user.role == UserRole.STUDENT:
+        read = _shuffle_evaluation_questions_for_student(read, current_user.id)
+    return read
 
 
 @router.put("/{evaluation_id}", response_model=EvaluationRead)

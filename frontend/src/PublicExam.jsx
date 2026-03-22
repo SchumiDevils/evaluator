@@ -32,6 +32,8 @@ export default function PublicExam({ linkId, apiUrl }) {
   const [timerExpired, setTimerExpired] = useState(false)
   const [sessionReady, setSessionReady] = useState(false)
   const [startError, setStartError] = useState('')
+  /** Întrebări în ordine amestecată per sesiune (de la POST /start, nu din GET public). */
+  const [sessionQuestions, setSessionQuestions] = useState(null)
 
   const load = useCallback(async () => {
     try {
@@ -53,6 +55,7 @@ export default function PublicExam({ linkId, apiUrl }) {
   const startSession = useCallback(async () => {
     setStartError('')
     setSessionReady(false)
+    setSessionQuestions(null)
     let stored =
       typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(sessionKey(linkId)) : null
     try {
@@ -75,6 +78,7 @@ export default function PublicExam({ linkId, apiUrl }) {
         const data = await res.json()
         setSessionToken(data.session_token)
         sessionStorage.setItem(sessionKey(linkId), data.session_token)
+        setSessionQuestions(Array.isArray(data.questions) ? data.questions : [])
         try {
           const raw =
             typeof sessionStorage !== 'undefined'
@@ -234,7 +238,7 @@ export default function PublicExam({ linkId, apiUrl }) {
     )
   }
 
-  const questions = evalData.questions || []
+  const questions = sessionQuestions ?? []
   const canAnswer = guestName.trim().length > 0 && !timerExpired && timeRemaining > 0
   const timerBlock = timerExpired || timeRemaining <= 0
 
@@ -306,6 +310,12 @@ export default function PublicExam({ linkId, apiUrl }) {
       </div>
 
       {submitError && <div className="notification error public-exam-notice">{submitError}</div>}
+
+      {questions.length === 0 && (
+        <div className="public-exam-card">
+          <p className="text-muted">Această evaluare nu conține exerciții.</p>
+        </div>
+      )}
 
       {questions.map((q, idx) => {
         const fb = feedbackResults[q.id]
