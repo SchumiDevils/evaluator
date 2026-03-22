@@ -24,6 +24,22 @@ def _sync_migrate(sync_conn: Any) -> None:
             sync_conn.execute(text("ALTER TABLE responses ADD COLUMN guest_name VARCHAR(255)"))
         if "guest_class" not in resp_cols:
             sync_conn.execute(text("ALTER TABLE responses ADD COLUMN guest_class VARCHAR(100)"))
+        if "public_session_token" not in resp_cols:
+            sync_conn.execute(text("ALTER TABLE responses ADD COLUMN public_session_token VARCHAR(40)"))
+            sync_conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_responses_public_session_question
+                    ON responses (evaluation_id, question_id, public_session_token)
+                    WHERE public_session_token IS NOT NULL
+                    """
+                )
+            )
+            sync_conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_responses_public_session_token ON responses (public_session_token)"
+                )
+            )
     if not insp.has_table("public_evaluation_attempts"):
         sync_conn.execute(
             text(

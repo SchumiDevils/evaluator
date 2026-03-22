@@ -7,6 +7,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -170,6 +171,18 @@ async def _student_enrolled(session: AsyncSession, user_id: int, evaluation_id: 
         )
     )
     return r.scalar_one_or_none() is not None
+
+
+def _public_feedback_response_from_response(resp: Response) -> FeedbackResponse:
+    return FeedbackResponse(
+        response_id=resp.id,
+        score=resp.score,
+        is_correct=None,
+        feedback=[
+            FeedbackItemSchema(category=f.category, message=f.message, source=f.source)
+            for f in resp.feedback_items
+        ],
+    )
 
 
 def _public_seconds_remaining(started_at: datetime, duration_minutes: int) -> int:
@@ -425,6 +438,19 @@ async def submit_public_answer(
     question = q_result.scalar_one_or_none()
     if not question or question.evaluation_id != ev.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Întrebare invalidă.")
+    session_token_norm = body.session_token.strip()
+    existing_r = await session.execute(
+        select(Response)
+        .where(
+            Response.evaluation_id == ev.id,
+            Response.question_id == body.question_id,
+            Response.public_session_token == session_token_norm,
+        )
+        .options(selectinload(Response.feedback_items))
+    )
+    existing = existing_r.scalar_one_or_none()
+    if existing:
+        return _public_feedback_response_from_response(existing)
     try:
         return await generate_and_store_feedback(
             session,
@@ -436,7 +462,26 @@ async def submit_public_answer(
             user=None,
             guest_name=body.guest_name.strip(),
             guest_class=body.guest_class.strip() or None,
+            public_session_token=session_token_norm,
         )
+    except IntegrityError:
+        await session.rollback()
+        retry_r = await session.execute(
+            select(Response)
+            .where(
+                Response.evaluation_id == ev.id,
+                Response.question_id == body.question_id,
+                Response.public_session_token == session_token_norm,
+            )
+            .options(selectinload(Response.feedback_items))
+        )
+        retry = retry_r.scalar_one_or_none()
+        if retry:
+            return _public_feedback_response_from_response(retry)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Răspunsul nu a putut fi salvat. Reîncearcă.",
+        ) from None
     except RuntimeError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
 

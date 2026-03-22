@@ -4,6 +4,8 @@ import './App.css'
 
 const API_PREFIX = '/api/v1'
 const sessionKey = (linkId) => `rubrix_public_session_${linkId}`
+const feedbackStorageKey = (linkId, sessionToken) =>
+  `rubrix_public_feedback_${linkId}_${sessionToken}`
 
 const Icons = {
   Send: () => (
@@ -73,6 +75,22 @@ export default function PublicExam({ linkId, apiUrl }) {
         const data = await res.json()
         setSessionToken(data.session_token)
         sessionStorage.setItem(sessionKey(linkId), data.session_token)
+        try {
+          const raw =
+            typeof sessionStorage !== 'undefined'
+              ? sessionStorage.getItem(feedbackStorageKey(linkId, data.session_token))
+              : null
+          if (raw) {
+            const parsed = JSON.parse(raw)
+            if (parsed && typeof parsed === 'object') {
+              setFeedbackResults(parsed)
+            }
+          } else {
+            setFeedbackResults({})
+          }
+        } catch {
+          setFeedbackResults({})
+        }
         const total = Math.max(60, (data.duration_minutes || 30) * 60)
         setTotalSeconds(total)
         const sec = Math.min(data.seconds_remaining ?? 0, total)
@@ -108,6 +126,9 @@ export default function PublicExam({ linkId, apiUrl }) {
   }, [sessionReady, timerExpired])
 
   const handleSubmitAnswer = async (questionId, answerText) => {
+    if (feedbackResults[questionId]) {
+      return
+    }
     const name = guestName.trim()
     if (!name) {
       setSubmitError('Introdu numele înainte de a trimite.')
@@ -146,13 +167,23 @@ export default function PublicExam({ linkId, apiUrl }) {
         throw new Error(msg)
       }
       const data = await res.json()
-      setFeedbackResults((prev) => ({
-        ...prev,
-        [questionId]: {
-          score: data.score,
-          feedback: data.feedback || [],
-        },
-      }))
+      setFeedbackResults((prev) => {
+        const next = {
+          ...prev,
+          [questionId]: {
+            score: data.score,
+            feedback: data.feedback || [],
+          },
+        }
+        try {
+          if (typeof sessionStorage !== 'undefined' && sessionToken) {
+            sessionStorage.setItem(feedbackStorageKey(linkId, sessionToken), JSON.stringify(next))
+          }
+        } catch {
+          /* ignore quota / private mode */
+        }
+        return next
+      })
     } catch (e) {
       setSubmitError(e.message || 'Eroare')
     } finally {
