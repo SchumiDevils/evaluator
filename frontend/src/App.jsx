@@ -183,6 +183,11 @@ const Icons = {
     <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
       <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
     </svg>
+  ),
+  User: () => (
+    <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+      <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+    </svg>
   )
 }
 
@@ -238,6 +243,17 @@ function App() {
   const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false)
   const [isMyResponsesLoading, setIsMyResponsesLoading] = useState(false)
   const [isExportingPdf, setIsExportingPdf] = useState(false)
+  const [profileForm, setProfileForm] = useState({
+    fullName: '',
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  })
+  const [profileAvatarFile, setProfileAvatarFile] = useState(null)
+  const [profileLocalAvatarUrl, setProfileLocalAvatarUrl] = useState(null)
+  const [profileRemoteAvatarUrl, setProfileRemoteAvatarUrl] = useState(null)
+  const [isProfileSaving, setIsProfileSaving] = useState(false)
+  const profileAvatarInputRef = useRef(null)
   const [detailTab, setDetailTab] = useState('questions')
   const [reevalForm, setReevalForm] = useState({})
   const [expandedStudents, setExpandedStudents] = useState({})
@@ -367,6 +383,52 @@ function App() {
     if (user) fetchAssessments()
   }, [user, fetchAssessments])
 
+  useEffect(() => {
+    if (!token || !user?.has_avatar) {
+      setProfileRemoteAvatarUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return null
+      })
+      return undefined
+    }
+    let cancelled = false
+    ;(async () => {
+      const res = await fetch(`${API_URL}${API_PREFIX}/auth/me/avatar`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok || cancelled) return
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      if (cancelled) {
+        URL.revokeObjectURL(url)
+        return
+      }
+      setProfileRemoteAvatarUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return url
+      })
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [token, user?.has_avatar])
+
+  useEffect(() => {
+    if (view !== 'profile' || !user) return
+    setProfileForm({
+      fullName: user.full_name || '',
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+    })
+    setProfileAvatarFile(null)
+    setProfileLocalAvatarUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+    if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = ''
+  }, [view, user?.id])
+
   const handleAuthChange = (field) => (e) => {
     setAuthForm((prev) => ({ ...prev, [field]: e.target.value }))
   }
@@ -421,6 +483,126 @@ function App() {
     setUser(null)
     setAssessments([])
     setView('dashboard')
+    setProfileRemoteAvatarUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+  }
+
+  const handleProfileAvatarPick = (e) => {
+    const f = e.target.files?.[0]
+    if (!f) return
+    setProfileLocalAvatarUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return URL.createObjectURL(f)
+    })
+    setProfileAvatarFile(f)
+  }
+
+  const handleProfileSave = async (e) => {
+    e.preventDefault()
+    setError('')
+    setSuccess('')
+    if (profileForm.newPassword && profileForm.newPassword !== profileForm.confirmPassword) {
+      setError('Parolele noi nu coincid.')
+      return
+    }
+    if (profileForm.newPassword && profileForm.newPassword.length < 6) {
+      setError('Parola nouă trebuie să aibă cel puțin 6 caractere.')
+      return
+    }
+    setIsProfileSaving(true)
+    try {
+      const patchBody = {}
+      const nameTrim = profileForm.fullName.trim()
+      if (nameTrim !== (user.full_name || '')) {
+        patchBody.full_name = nameTrim || null
+      }
+      if (profileForm.newPassword) {
+        if (!profileForm.currentPassword) {
+          setError('Introdu parola curentă pentru a schimba parola.')
+          setIsProfileSaving(false)
+          return
+        }
+        patchBody.current_password = profileForm.currentPassword
+        patchBody.new_password = profileForm.newPassword
+      }
+      if (Object.keys(patchBody).length > 0) {
+        const res = await fetch(`${API_URL}${API_PREFIX}/auth/me`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify(patchBody)
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(typeof err.detail === 'string' ? err.detail : 'Nu s-a putut salva profilul.')
+        }
+      }
+      if (profileAvatarFile) {
+        const fd = new FormData()
+        fd.append('file', profileAvatarFile)
+        const res = await fetch(`${API_URL}${API_PREFIX}/auth/me/avatar`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: fd
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(typeof err.detail === 'string' ? err.detail : 'Încărcarea avatarului a eșuat.')
+        }
+      }
+      if (Object.keys(patchBody).length === 0 && !profileAvatarFile) {
+        setSuccess('Nicio modificare de salvat.')
+        setIsProfileSaving(false)
+        return
+      }
+      await fetchProfile()
+      setProfileForm((p) => ({
+        ...p,
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: ''
+      }))
+      setProfileAvatarFile(null)
+      setProfileLocalAvatarUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return null
+      })
+      if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = ''
+      setSuccess('Profil salvat.')
+    } catch (err) {
+      setError(err.message || 'Eroare la salvare.')
+    } finally {
+      setIsProfileSaving(false)
+    }
+  }
+
+  const handleRemoveAvatar = async () => {
+    setError('')
+    setSuccess('')
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/auth/me/avatar`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(typeof err.detail === 'string' ? err.detail : 'Nu s-a putut elimina avatarul.')
+      }
+      await fetchProfile()
+      setProfileAvatarFile(null)
+      setProfileLocalAvatarUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return null
+      })
+      if (profileAvatarInputRef.current) profileAvatarInputRef.current.value = ''
+      setSuccess('Avatar eliminat.')
+    } catch (err) {
+      setError(err.message || 'Eroare.')
+    }
   }
 
   const QUESTION_TYPES = [
@@ -1125,6 +1307,17 @@ function App() {
             <span>Răspunsurile mele</span>
           </button>
         )}
+        <button
+          type="button"
+          className={view === 'profile' ? 'active' : ''}
+          onClick={() => {
+            setView('profile')
+            setSelectedAssessment(null)
+          }}
+        >
+          <Icons.User />
+          <span>Profil</span>
+        </button>
         <button className="icon-only" onClick={handleLogout} title="Logout">
           <Icons.Logout />
         </button>
@@ -1714,6 +1907,134 @@ function App() {
               })}
             </div>
           )}
+        </main>
+      </div>
+    )
+  }
+
+  // Profile view
+  if (view === 'profile' && user) {
+    const avatarDisplayUrl = profileLocalAvatarUrl || profileRemoteAvatarUrl
+    const initials = (user.full_name || user.email || '?')
+      .trim()
+      .split(/\s+/)
+      .map((s) => s[0])
+      .filter(Boolean)
+      .slice(0, 2)
+      .join('')
+      .toUpperCase() || '?'
+
+    return (
+      <div className="app-layout">
+        <Navbar />
+        {notifications}
+        <main className="main-content">
+          <div className="page-header">
+            <div>
+              <button type="button" className="btn-back" onClick={() => setView('dashboard')}>
+                <Icons.Back />
+                Înapoi
+              </button>
+              <h1>Profil</h1>
+              <p>Actualizează numele afișat, parola și fotografia de profil.</p>
+            </div>
+          </div>
+
+          <ParticleCard
+            className="profile-card magic-bento-card magic-bento-card--border-glow"
+            disableAnimations={isMobile}
+            particleCount={8}
+            glowColor="132, 0, 255"
+            enableTilt={false}
+            clickEffect
+          >
+            <div className="profile-avatar-block">
+              <div className="profile-avatar-circle">
+                {avatarDisplayUrl ? (
+                  <img src={avatarDisplayUrl} alt="" className="profile-avatar-img" />
+                ) : (
+                  <span className="profile-avatar-initials">{initials}</span>
+                )}
+              </div>
+              <div className="profile-avatar-actions">
+                <label className="btn-secondary btn-sm profile-avatar-upload-label">
+                  <input
+                    ref={profileAvatarInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    className="profile-avatar-file-input"
+                    onChange={handleProfileAvatarPick}
+                  />
+                  Schimbă imaginea
+                </label>
+                {user.has_avatar && (
+                  <button type="button" className="btn-secondary btn-sm" onClick={handleRemoveAvatar}>
+                    Elimină avatar
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <form className="profile-form assessment-form" onSubmit={handleProfileSave}>
+              <label>
+                Nume afișat
+                <input
+                  type="text"
+                  value={profileForm.fullName}
+                  onChange={(e) => setProfileForm((p) => ({ ...p, fullName: e.target.value }))}
+                  placeholder="ex: Ion Popescu"
+                  maxLength={255}
+                />
+              </label>
+              <label>
+                Email
+                <input type="email" value={user.email} readOnly disabled className="input-readonly" />
+              </label>
+              <p className="profile-form-hint text-muted">Rol: {user.role === 'professor' ? 'Profesor' : 'Student'}</p>
+
+              <h3 className="profile-section-title">Schimbă parola</h3>
+              <p className="text-muted profile-form-hint">Lasă gol dacă nu vrei să modifici parola.</p>
+              <label>
+                Parola curentă
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={profileForm.currentPassword}
+                  onChange={(e) => setProfileForm((p) => ({ ...p, currentPassword: e.target.value }))}
+                  placeholder="••••••••"
+                />
+              </label>
+              <label>
+                Parola nouă
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={profileForm.newPassword}
+                  onChange={(e) => setProfileForm((p) => ({ ...p, newPassword: e.target.value }))}
+                  placeholder="minim 6 caractere"
+                />
+              </label>
+              <label>
+                Confirmă parola nouă
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={profileForm.confirmPassword}
+                  onChange={(e) => setProfileForm((p) => ({ ...p, confirmPassword: e.target.value }))}
+                  placeholder="repetă parola nouă"
+                />
+              </label>
+
+              <div className="form-actions">
+                <button type="button" className="btn-secondary" onClick={() => setView('dashboard')}>
+                  Anulează
+                </button>
+                <button type="submit" className="btn-primary" disabled={isProfileSaving}>
+                  {isProfileSaving ? 'Se salvează…' : 'Salvează modificările'}
+                </button>
+              </div>
+            </form>
+          </ParticleCard>
         </main>
       </div>
     )

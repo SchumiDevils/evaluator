@@ -64,6 +64,12 @@ def _sync_migrate(sync_conn: Any) -> None:
         sync_conn.execute(
             text("CREATE INDEX ix_public_evaluation_attempts_evaluation_id ON public_evaluation_attempts (evaluation_id)")
         )
+    if insp.has_table("users"):
+        user_cols = {c["name"] for c in insp.get_columns("users")}
+        if "avatar_mime" not in user_cols:
+            sync_conn.execute(text("ALTER TABLE users ADD COLUMN avatar_mime VARCHAR(64)"))
+        if "avatar_content" not in user_cols:
+            sync_conn.execute(text("ALTER TABLE users ADD COLUMN avatar_content BLOB"))
 
 
 async def run_schema_migrations(conn: AsyncConnection) -> None:

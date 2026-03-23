@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 from typing import List, Optional
 
-from sqlalchemy import Enum, String
+from sqlalchemy import Enum, LargeBinary, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin
@@ -23,6 +23,8 @@ class User(TimestampMixin, Base):
     full_name: Mapped[Optional[str]] = mapped_column(String(255))
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.STUDENT, nullable=False)
+    avatar_mime: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    avatar_content: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
 
     evaluations: Mapped[List["Evaluation"]] = relationship(back_populates="author", cascade="all, delete")
     responses: Mapped[List["Response"]] = relationship(back_populates="author", cascade="all, delete")
