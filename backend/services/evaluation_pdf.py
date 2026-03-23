@@ -47,8 +47,18 @@ def _effective_page_width(pdf: FPDF) -> float:
     return float(pdf.w - pdf.l_margin - pdf.r_margin)
 
 
+def _reset_x(pdf: FPDF) -> None:
+    pdf.set_x(pdf.l_margin)
+
+
+def _cell_line(pdf: FPDF, h: float, text: str) -> None:
+    """O linie scurtă, lățime explicită — fără cell(0) care depinde de poziția curentă a cursorului."""
+    _reset_x(pdf)
+    pdf.cell(_effective_page_width(pdf), h, text, ln=1)
+
+
 def _multi_cell_full(pdf: FPDF, h: float, text: str, *, indent: float = 0) -> None:
-    """Evită multi_cell(0, …) când cursorul e lângă marginea dreaptă (FPDFException)."""
+    """Text potențial lung; după multi_cell resetează X (altfel următorul cell începe din dreapta)."""
     full = _effective_page_width(pdf)
     w = full - indent
     if w < 12:
@@ -56,6 +66,7 @@ def _multi_cell_full(pdf: FPDF, h: float, text: str, *, indent: float = 0) -> No
         w = full
     pdf.set_x(pdf.l_margin + indent)
     pdf.multi_cell(w, h, text)
+    _reset_x(pdf)
 
 
 def build_evaluation_results_pdf(
@@ -80,24 +91,25 @@ def build_evaluation_results_pdf(
     pdf.set_font("DejaVu", "B", 16)
     _multi_cell_full(pdf, 10, _safe_text(title)[:500])
     pdf.ln(2)
+
     pdf.set_font("DejaVu", "", 10)
     if subject:
-        pdf.cell(0, 6, f"Materie: {_safe_text(subject)}", ln=True)
+        _multi_cell_full(pdf, 6, f"Materie: {_safe_text(subject)}")
     if description:
         _multi_cell_full(pdf, 6, f"Descriere: {_safe_text(description)}")
-    pdf.cell(
-        0,
+
+    _cell_line(
+        pdf,
         6,
         f"Export: {exported_at.strftime('%Y-%m-%d %H:%M')} (UTC)",
-        ln=True,
     )
     if professor_name:
-        pdf.cell(0, 6, f"Profesor: {_safe_text(professor_name)}", ln=True)
+        _cell_line(pdf, 6, f"Profesor: {_safe_text(professor_name)}")
     pdf.ln(4)
 
     if not grouped_students:
         pdf.set_font("DejaVu", "", 10)
-        pdf.cell(0, 8, "Niciun răspuns înregistrat.", ln=True)
+        _cell_line(pdf, 8, "Niciun răspuns înregistrat.")
         out = pdf.output()
         return bytes(out) if isinstance(out, (bytes, bytearray)) else bytes(out)
 
@@ -109,18 +121,23 @@ def build_evaluation_results_pdf(
 
         pdf.set_font("DejaVu", "B", 12)
         _multi_cell_full(pdf, 8, f"{idx}. {_safe_text(name)}")
+
         if total is not None and max_pts is not None and max_pts > 0:
             pdf.set_font("DejaVu", "", 10)
-            pdf.cell(0, 6, f"Total: {total}/{max_pts} puncte", ln=True)
+            _cell_line(pdf, 6, f"Total: {total}/{max_pts} puncte")
+
         pdf.ln(2)
 
         for r in responses:
             ex = r.get("ex_index", "?")
             qtext = r.get("question_text") or ""
+
             pdf.set_font("DejaVu", "B", 10)
             _multi_cell_full(pdf, 6, f"Exercițiul {ex}: {_safe_text(qtext)}")
+
             pdf.set_font("DejaVu", "", 10)
-            pdf.cell(0, 6, "Răspuns:", ln=True)
+            _cell_line(pdf, 6, "Răspuns:")
+
             ans = _safe_text(r.get("answer_text")) or "—"
             pdf.set_font("DejaVu", "", 10)
             _multi_cell_full(pdf, 6, ans)
@@ -128,7 +145,8 @@ def build_evaluation_results_pdf(
             score = r.get("score")
             pts = r.get("points")
             if score is not None and pts is not None:
-                pdf.cell(0, 6, f"Scor: {score}/{pts} puncte", ln=True)
+                pdf.set_font("DejaVu", "B", 10)
+                _cell_line(pdf, 6, f"Scor: {score}/{pts} puncte")
 
             for fb in r.get("feedback") or []:
                 cat = _safe_text(fb.get("category"))
@@ -136,6 +154,7 @@ def build_evaluation_results_pdf(
                 src = _safe_text(fb.get("source"))
                 pdf.set_font("DejaVu", "", 9)
                 _multi_cell_full(pdf, 5, f"- [{cat}] ({src}): {msg}", indent=6)
+
             pdf.ln(3)
 
     out = pdf.output()
