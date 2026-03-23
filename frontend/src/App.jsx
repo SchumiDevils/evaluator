@@ -184,6 +184,16 @@ const Icons = {
       <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
     </svg>
   ),
+  Sun: () => (
+    <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22">
+      <path d="M12 7a5 5 0 100 10 5 5 0 000-10zM2 13h2v-2H2v2zm18 0h2v-2h-2v2zm-8 8h2v-2h-2v2zm0-18h2V2h-2v2zm7.07 3.93l1.41-1.41-1.79-1.79-1.41 1.41 1.79 1.79zM4.22 19.78l1.41-1.41-1.79-1.79-1.41 1.41 1.79 1.79zm15.56 0l1.79-1.79-1.41-1.41-1.79 1.79 1.41 1.41zM4.22 4.22l1.79-1.79 1.41 1.41-1.79 1.79-1.41-1.41z"/>
+    </svg>
+  ),
+  Moon: () => (
+    <svg viewBox="0 0 24 24" fill="currentColor" width="22" height="22">
+      <path d="M12.34 2.02C6.59 1.82 2 6.62 2 12.26c0 5.52 4.48 10 10 10 3.71 0 6.93-2.02 8.66-5.02-8.56-.5-15.36-7.29-15.92-15.96-.03-.1-.04-.19-.4-.26z"/>
+    </svg>
+  ),
   User: () => (
     <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
       <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
@@ -260,6 +270,12 @@ function App() {
   const [joinCode, setJoinCode] = useState('')
   const [isJoining, setIsJoining] = useState(false)
 
+  const [theme, setTheme] = useState(() =>
+    typeof localStorage !== 'undefined' && localStorage.getItem('rubrix-theme') === 'light'
+      ? 'light'
+      : 'dark'
+  )
+
   // Timer state
   const [timeRemaining, setTimeRemaining] = useState(null)
   const [timerExpired, setTimerExpired] = useState(false)
@@ -277,6 +293,17 @@ function App() {
       localStorage.removeItem('auth_token')
     }
   }, [token])
+
+  useEffect(() => {
+    const root = document.documentElement
+    if (theme === 'light') {
+      root.setAttribute('data-theme', 'light')
+      localStorage.setItem('rubrix-theme', 'light')
+    } else {
+      root.removeAttribute('data-theme')
+      localStorage.removeItem('rubrix-theme')
+    }
+  }, [theme])
 
   // Clear messages after 5 seconds
   useEffect(() => {
@@ -1187,8 +1214,23 @@ function App() {
   if (!isAuthenticated) {
     return (
       <div className="auth-page">
+        <button
+          type="button"
+          className="auth-theme-toggle"
+          onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+          title={theme === 'dark' ? 'Temă deschisă' : 'Temă întunecată'}
+          aria-label={theme === 'dark' ? 'Activează tema deschisă' : 'Activează tema întunecată'}
+        >
+          {theme === 'dark' ? <Icons.Sun /> : <Icons.Moon />}
+        </button>
         <div className="auth-silk-bg">
-          <Silk speed={5} scale={1} color="#6521a1" noiseIntensity={1.5} rotation={0} />
+          <Silk
+            speed={5}
+            scale={1}
+            color={theme === 'light' ? '#9b7fd4' : '#6521a1'}
+            noiseIntensity={1.5}
+            rotation={0}
+          />
         </div>
         <div className="auth-container">
           <div className="auth-logo">
@@ -1317,6 +1359,15 @@ function App() {
         >
           <Icons.User />
           <span>Profil</span>
+        </button>
+        <button
+          type="button"
+          className="icon-only"
+          onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+          title={theme === 'dark' ? 'Temă deschisă' : 'Temă întunecată'}
+          aria-label={theme === 'dark' ? 'Activează tema deschisă' : 'Activează tema întunecată'}
+        >
+          {theme === 'dark' ? <Icons.Sun /> : <Icons.Moon />}
         </button>
         <button className="icon-only" onClick={handleLogout} title="Logout">
           <Icons.Logout />
@@ -2043,9 +2094,14 @@ function App() {
   // Analytics view
   const CHART_COLORS = ['#8B5CF6', '#A78BFA', '#7C3AED', '#6D28D9', '#C4B5FD', '#DDD6FE']
   const chartTooltipStyle = {
-    contentStyle: { background: '#1a1025', border: '1px solid rgba(139,92,246,0.3)', borderRadius: 8, color: '#e0d4ff' },
-    labelStyle: { color: '#a78bfa' },
-    itemStyle: { color: '#e0d4ff' },
+    contentStyle: {
+      background: 'var(--chart-tooltip-bg)',
+      border: '1px solid var(--chart-tooltip-border)',
+      borderRadius: 8,
+      color: 'var(--chart-tooltip-fg)',
+    },
+    labelStyle: { color: 'var(--chart-axis)' },
+    itemStyle: { color: 'var(--chart-tooltip-fg)' },
   }
 
   if (view === 'analytics') {
@@ -2078,9 +2134,9 @@ function App() {
               <p className="analytics-subtitle">Câte răspunsuri per interval de scor</p>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={score_distribution} margin={{ top: 20, right: 20, bottom: 20, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(139,92,246,0.15)" />
-                  <XAxis dataKey="range" stroke="#a78bfa" fontSize={12} />
-                  <YAxis stroke="#a78bfa" fontSize={12} allowDecimals={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                  <XAxis dataKey="range" stroke="var(--chart-axis)" fontSize={12} />
+                  <YAxis stroke="var(--chart-axis)" fontSize={12} allowDecimals={false} />
                   <Tooltip {...chartTooltipStyle} />
                   <Bar dataKey="count" name="Răspunsuri" radius={[6, 6, 0, 0]}>
                     {score_distribution.map((_, i) => (
@@ -2098,11 +2154,11 @@ function App() {
               </p>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={evaluation_averages} margin={{ top: 20, right: 20, bottom: 20, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(139,92,246,0.15)" />
-                  <XAxis dataKey="evaluation_title" stroke="#a78bfa" fontSize={11} interval={0} angle={-15} textAnchor="end" height={60} />
-                  <YAxis stroke="#a78bfa" fontSize={12} domain={[0, 100]} unit="%" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                  <XAxis dataKey="evaluation_title" stroke="var(--chart-axis)" fontSize={11} interval={0} angle={-15} textAnchor="end" height={60} />
+                  <YAxis stroke="var(--chart-axis)" fontSize={12} domain={[0, 100]} unit="%" />
                   <Tooltip {...chartTooltipStyle} formatter={(v) => `${v}%`} />
-                  <Legend wrapperStyle={{ color: '#e0d4ff', fontSize: 12 }} />
+                  <Legend wrapperStyle={{ color: 'var(--text-primary)', fontSize: 12 }} />
                   <Bar dataKey="class_avg_percent" name="Media clasei" fill="#8B5CF6" radius={[6, 6, 0, 0]} />
                   {!isProfessor && (
                     <Bar dataKey="student_avg_percent" name="Scorul tău" fill="#22d3ee" radius={[6, 6, 0, 0]} />
@@ -2117,9 +2173,9 @@ function App() {
               {question_success.length > 0 ? (
                 <ResponsiveContainer width="100%" height={Math.max(300, question_success.length * 45)}>
                   <BarChart data={question_success} layout="vertical" margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(139,92,246,0.15)" />
-                    <XAxis type="number" stroke="#a78bfa" fontSize={12} domain={[0, 100]} unit="%" />
-                    <YAxis type="category" dataKey="question_text" stroke="#a78bfa" fontSize={11} width={200} tick={{ fill: '#c4b5fd' }} />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                    <XAxis type="number" stroke="var(--chart-axis)" fontSize={12} domain={[0, 100]} unit="%" />
+                    <YAxis type="category" dataKey="question_text" stroke="var(--chart-axis)" fontSize={11} width={200} tick={{ fill: 'var(--chart-tick-fill)' }} />
                     <Tooltip {...chartTooltipStyle} formatter={(v) => `${v}%`} />
                     <Bar dataKey="avg_percent" name="Media %" fill="#A78BFA" radius={[0, 6, 6, 0]}>
                       {question_success.map((entry, i) => (
@@ -2139,9 +2195,9 @@ function App() {
                 <p className="analytics-subtitle">Cum ai progresat de la o evaluare la alta</p>
                 <ResponsiveContainer width="100%" height={300}>
                   <LineChart data={student_evolution} margin={{ top: 20, right: 20, bottom: 20, left: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(139,92,246,0.15)" />
-                    <XAxis dataKey="evaluation_title" stroke="#a78bfa" fontSize={11} angle={-15} textAnchor="end" height={60} />
-                    <YAxis stroke="#a78bfa" fontSize={12} domain={[0, 100]} unit="%" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                    <XAxis dataKey="evaluation_title" stroke="var(--chart-axis)" fontSize={11} angle={-15} textAnchor="end" height={60} />
+                    <YAxis stroke="var(--chart-axis)" fontSize={12} domain={[0, 100]} unit="%" />
                     <Tooltip {...chartTooltipStyle} formatter={(v) => `${v}%`} />
                     <Line
                       type="monotone"
