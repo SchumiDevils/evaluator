@@ -38,9 +38,9 @@ class Settings(BaseSettings):
             "http://127.0.0.1:5173",
         ]
     )
-    # Matches any https://*.vercel.app (production + preview deploys)
+    # *.vercel.app — subdomeniul poate conține puncte (ex. preview deploy)
     allow_origin_regex: Optional[str] = Field(
-        default=r"^https://[a-zA-Z0-9\-]+\.vercel\.app$",
+        default=r"^https://[a-zA-Z0-9.\-]+\.vercel\.app$",
         description="Regex for extra allowed origins (Vercel frontends).",
     )
 

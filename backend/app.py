@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .core.config import get_settings
+from .core.cors import effective_origin_regex
+from .core.http_middleware import CORSHeadersFixMiddleware
 from .db.migrate import backfill_evaluation_access_and_enrollments, run_schema_migrations
 from .db.session import async_session_maker, engine
 from .models import Base  # noqa: F401 — triggers model registration
@@ -13,9 +15,7 @@ settings = get_settings()
 
 app = FastAPI(title=settings.app_name, version="0.2.0")
 
-# Regex Vercel: dacă în env ALLOW_ORIGIN_REGEX e șir gol, Pydantic poate seta "" și regex-ul se pierde.
-_vercel_app_regex = r"^https://[a-zA-Z0-9\-]+\.vercel\.app$"
-_origin_regex = (settings.allow_origin_regex or "").strip() or _vercel_app_regex
+_origin_regex = effective_origin_regex()
 
 _cors = dict(
     allow_origins=settings.allow_origins,
@@ -26,6 +26,8 @@ _cors = dict(
 )
 
 app.add_middleware(CORSMiddleware, **_cors)
+# După CORSMiddleware: completează header-e CORS pe răspunsuri unde lipseau (ex. 500).
+app.add_middleware(CORSHeadersFixMiddleware)
 
 
 @app.on_event("startup")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, List, Optional
@@ -34,6 +35,8 @@ from ..schemas.feedback import (
 from ..services.evaluation_pdf import build_evaluation_results_pdf
 from ..services.feedback_service import generate_and_store_feedback
 from .auth import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/evaluations", tags=["evaluations"])
 
@@ -935,14 +938,21 @@ async def export_evaluation_pdf(
         )
 
     exported_at = datetime.now(timezone.utc)
-    pdf_bytes = build_evaluation_results_pdf(
-        title=evaluation.title,
-        subject=evaluation.subject,
-        description=evaluation.description,
-        professor_name=current_user.full_name,
-        exported_at=exported_at,
-        grouped_students=grouped_students,
-    )
+    try:
+        pdf_bytes = build_evaluation_results_pdf(
+            title=evaluation.title,
+            subject=evaluation.subject,
+            description=evaluation.description,
+            professor_name=current_user.full_name,
+            exported_at=exported_at,
+            grouped_students=grouped_students,
+        )
+    except Exception as exc:
+        logger.exception("export/pdf failed for evaluation_id=%s", evaluation_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Generarea PDF a eșuat pe server.",
+        ) from exc
 
     safe_name = f"evaluare-{evaluation_id}.pdf"
     return HttpPdfResponse(
