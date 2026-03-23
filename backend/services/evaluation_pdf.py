@@ -40,6 +40,24 @@ def _safe_text(s: Optional[str]) -> str:
     return str(s).replace("\r\n", "\n")
 
 
+def _effective_page_width(pdf: FPDF) -> float:
+    epw = getattr(pdf, "epw", None)
+    if epw is not None:
+        return float(epw)
+    return float(pdf.w - pdf.l_margin - pdf.r_margin)
+
+
+def _multi_cell_full(pdf: FPDF, h: float, text: str, *, indent: float = 0) -> None:
+    """Evită multi_cell(0, …) când cursorul e lângă marginea dreaptă (FPDFException)."""
+    full = _effective_page_width(pdf)
+    w = full - indent
+    if w < 12:
+        indent = 0
+        w = full
+    pdf.set_x(pdf.l_margin + indent)
+    pdf.multi_cell(w, h, text)
+
+
 def build_evaluation_results_pdf(
     *,
     title: str,
@@ -60,13 +78,13 @@ def build_evaluation_results_pdf(
 
     pdf.add_page()
     pdf.set_font("DejaVu", "B", 16)
-    pdf.multi_cell(0, 10, _safe_text(title)[:500])
+    _multi_cell_full(pdf, 10, _safe_text(title)[:500])
     pdf.ln(2)
     pdf.set_font("DejaVu", "", 10)
     if subject:
         pdf.cell(0, 6, f"Materie: {_safe_text(subject)}", ln=True)
     if description:
-        pdf.multi_cell(0, 6, f"Descriere: {_safe_text(description)}")
+        _multi_cell_full(pdf, 6, f"Descriere: {_safe_text(description)}")
     pdf.cell(
         0,
         6,
@@ -90,7 +108,7 @@ def build_evaluation_results_pdf(
         max_pts = group.get("max_score")
 
         pdf.set_font("DejaVu", "B", 12)
-        pdf.multi_cell(0, 8, f"{idx}. {_safe_text(name)}")
+        _multi_cell_full(pdf, 8, f"{idx}. {_safe_text(name)}")
         if total is not None and max_pts is not None and max_pts > 0:
             pdf.set_font("DejaVu", "", 10)
             pdf.cell(0, 6, f"Total: {total}/{max_pts} puncte", ln=True)
@@ -100,12 +118,12 @@ def build_evaluation_results_pdf(
             ex = r.get("ex_index", "?")
             qtext = r.get("question_text") or ""
             pdf.set_font("DejaVu", "B", 10)
-            pdf.multi_cell(0, 6, f"Exercițiul {ex}: {_safe_text(qtext)}")
+            _multi_cell_full(pdf, 6, f"Exercițiul {ex}: {_safe_text(qtext)}")
             pdf.set_font("DejaVu", "", 10)
             pdf.cell(0, 6, "Răspuns:", ln=True)
             ans = _safe_text(r.get("answer_text")) or "—"
             pdf.set_font("DejaVu", "", 10)
-            pdf.multi_cell(0, 6, ans)
+            _multi_cell_full(pdf, 6, ans)
 
             score = r.get("score")
             pts = r.get("points")
@@ -117,7 +135,7 @@ def build_evaluation_results_pdf(
                 msg = _safe_text(fb.get("message"))
                 src = _safe_text(fb.get("source"))
                 pdf.set_font("DejaVu", "", 9)
-                pdf.multi_cell(0, 5, f"  • [{cat}] ({src}): {msg}")
+                _multi_cell_full(pdf, 5, f"- [{cat}] ({src}): {msg}", indent=6)
             pdf.ln(3)
 
     out = pdf.output()
