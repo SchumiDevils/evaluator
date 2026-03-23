@@ -178,6 +178,11 @@ const Icons = {
     <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
       <path d="M5 9.2h3V19H5V9.2zM10.6 5h2.8v14h-2.8V5zm5.6 8H19v6h-2.8v-6z"/>
     </svg>
+  ),
+  Pdf: () => (
+    <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+      <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+    </svg>
   )
 }
 
@@ -232,6 +237,7 @@ function App() {
   const [analyticsData, setAnalyticsData] = useState(null)
   const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false)
   const [isMyResponsesLoading, setIsMyResponsesLoading] = useState(false)
+  const [isExportingPdf, setIsExportingPdf] = useState(false)
   const [detailTab, setDetailTab] = useState('questions')
   const [reevalForm, setReevalForm] = useState({})
   const [expandedStudents, setExpandedStudents] = useState({})
@@ -765,6 +771,33 @@ function App() {
       setError('Nu s-au putut încărca răspunsurile studenților.')
     }
     return []
+  }
+
+  const handleExportPdf = async () => {
+    if (!selectedAssessment?.id) return
+    setIsExportingPdf(true)
+    setError('')
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/${selectedAssessment.id}/export/pdf`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error(err.detail ?? 'Exportul PDF a eșuat.')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `evaluare-${selectedAssessment.id}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+      setSuccess('PDF-ul a fost descărcat.')
+    } catch (err) {
+      setError(err.message || 'Exportul PDF a eșuat.')
+    } finally {
+      setIsExportingPdf(false)
+    }
   }
 
   const fetchMyResponses = async (evaluationId) => {
@@ -1443,6 +1476,17 @@ function App() {
 
           {detailTab === 'responses' && isOwner && (
             <div className="responses-view">
+              <div className="responses-export-bar">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleExportPdf}
+                  disabled={isExportingPdf}
+                >
+                  <Icons.Pdf />
+                  {isExportingPdf ? 'Se generează PDF…' : 'Exportă PDF'}
+                </button>
+              </div>
               {Object.keys(groupedByStudent).length === 0 ? (
                 <div className="empty-state">
                   <Icons.People />

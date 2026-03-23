@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi.responses import Response as HttpPdfResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -30,6 +31,7 @@ from ..schemas.feedback import (
     ProfessorFeedbackUpdate,
     ResponseRead,
 )
+from ..services.evaluation_pdf import build_evaluation_results_pdf
 from ..services.feedback_service import generate_and_store_feedback
 from .auth import get_current_user
 
@@ -837,6 +839,117 @@ async def list_evaluation_responses(
         )
         for r in responses
     ]
+
+
+def _participant_key(resp: Response) -> str:
+    if resp.user_id is not None:
+        return f"u-{resp.user_id}"
+    gn = (resp.guest_name or "").strip()
+    gc = (resp.guest_class or "").strip()
+    return f"g-{gn}|{gc}"
+
+
+@router.get("/{evaluation_id}/export/pdf")
+async def export_evaluation_pdf(
+    evaluation_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> HttpPdfResponse:
+    """Profesorul care deține evaluarea exportă toate răspunsurile ca PDF."""
+    ev_result = await session.execute(
+        select(Evaluation)
+        .where(Evaluation.id == evaluation_id, Evaluation.author_id == current_user.id)
+        .options(selectinload(Evaluation.questions))
+    )
+    evaluation = ev_result.scalar_one_or_none()
+    if not evaluation:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
+
+    result = await session.execute(
+        select(Response)
+        .where(Response.evaluation_id == evaluation_id)
+        .options(selectinload(Response.feedback_items), selectinload(Response.author))
+        .order_by(Response.created_at.desc())
+    )
+    responses = result.scalars().all()
+
+    questions_ordered = sorted(evaluation.questions, key=lambda q: q.order)
+    q_by_id = {q.id: q for q in questions_ordered}
+    ex_num_by_qid = {q.id: i + 1 for i, q in enumerate(questions_ordered)}
+
+    def _display_name(resp: Response) -> Optional[str]:
+        if resp.author and resp.author.full_name:
+            return resp.author.full_name
+        if resp.guest_name:
+            return f"{resp.guest_name}" + (f" ({resp.guest_class})" if resp.guest_class else "") + " [Guest]"
+        return None
+
+    groups: dict[str, list[Response]] = {}
+    key_order: list[str] = []
+    for r in responses:
+        key = _participant_key(r)
+        if key not in groups:
+            groups[key] = []
+            key_order.append(key)
+        groups[key].append(r)
+
+    grouped_students: list[dict[str, Any]] = []
+    for key in key_order:
+        rs = groups[key]
+        name = _display_name(rs[0]) or "Participant"
+
+        def _sort_key(resp: Response) -> tuple[int, int]:
+            q = q_by_id.get(resp.question_id)
+            return (q.order if q else 999999, resp.id)
+
+        sorted_rs = sorted(rs, key=_sort_key)
+        total_score = 0
+        max_score = 0
+        student_rows: list[dict[str, Any]] = []
+        for r in sorted_rs:
+            q = q_by_id.get(r.question_id)
+            if q:
+                max_score += q.points
+            if r.score is not None:
+                total_score += r.score
+            student_rows.append(
+                {
+                    "ex_index": ex_num_by_qid.get(r.question_id, "?"),
+                    "question_text": q.text if q else "Întrebare necunoscută",
+                    "answer_text": r.answer_text,
+                    "score": r.score,
+                    "points": q.points if q else None,
+                    "feedback": [
+                        {"category": fb.category, "message": fb.message, "source": fb.source}
+                        for fb in r.feedback_items
+                    ],
+                }
+            )
+        grouped_students.append(
+            {
+                "name": name,
+                "responses": student_rows,
+                "total_score": total_score if sorted_rs else None,
+                "max_score": max_score if max_score else None,
+            }
+        )
+
+    exported_at = datetime.now(timezone.utc)
+    pdf_bytes = build_evaluation_results_pdf(
+        title=evaluation.title,
+        subject=evaluation.subject,
+        description=evaluation.description,
+        professor_name=current_user.full_name,
+        exported_at=exported_at,
+        grouped_students=grouped_students,
+    )
+
+    safe_name = f"evaluare-{evaluation_id}.pdf"
+    return HttpPdfResponse(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
 
 
 @router.get("/{evaluation_id}/my-responses", response_model=List[ResponseRead])

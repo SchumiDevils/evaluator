@@ -1646,6 +1646,11 @@
   gap: 1.5rem;
 }
 
+.responses-export-bar {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .student-response-card {
   background: var(--surface);
   border: 1px solid var(--border);
