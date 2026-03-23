@@ -66,7 +66,8 @@ def build_evaluation_results_pdf(
     pdf.ln(4)
 
     if not grouped_students:
-        pdf.set_font("DejaVu", "I", 10)
+        # Nu folosim stilul "I" fără DejaVuSans-Oblique.ttf înregistrat (aruncă FPDFException).
+        pdf.set_font("DejaVu", "", 10)
         pdf.cell(0, 8, "Niciun răspuns înregistrat.", ln=True)
         out = pdf.output()
         return out if isinstance(out, bytes) else bytes(out)
