@@ -127,7 +127,13 @@ class PublicEvaluationRead(BaseModel):
     subject: Optional[str]
     description: Optional[str]
     duration: int
-    questions: List[QuestionRead]
+    questions: List[QuestionRead] = []
+    scheduled_starts_at: Optional[datetime] = None
+    scheduled_ends_at: Optional[datetime] = None
+    question_count: int = 0
+    schedule_access_blocked: bool = False
+    schedule_block_kind: Optional[str] = None
+    schedule_block_message: Optional[str] = None
 
 
 class PublicStartBody(BaseModel):
@@ -494,20 +500,22 @@ async def get_public_evaluation(
     session: AsyncSession = Depends(get_session),
 ) -> PublicEvaluationRead:
     result = await session.execute(
-        select(Evaluation).where(
+        select(Evaluation)
+        .where(
             Evaluation.public_link_id == public_link_id,
             Evaluation.status == "active",
         )
+        .options(selectinload(Evaluation.questions))
     )
     ev = result.scalar_one_or_none()
     if not ev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link invalid sau evaluare inactivă.")
     now = datetime.now(timezone.utc)
-    denied = schedule_blocks_access(ev, now)
-    if denied:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=denied)
-    # Întrebările nu sunt incluse aici — ordinea și conținutul se dau doar la /start (per sesiune),
-    # ca să nu poată fi citite înainte de începerea examenului.
+    nq = len(ev.questions)
+    open_now = student_may_access_evaluation(ev, now)
+    kind = schedule_block_kind(ev, now) if not open_now else None
+    msg = schedule_blocks_access(ev, now) if not open_now else None
+    # Întrebările nu sunt incluse aici — conținutul se dă doar la /start când fereastra e deschisă.
     return PublicEvaluationRead(
         id=ev.id,
         title=ev.title,
@@ -515,6 +523,12 @@ async def get_public_evaluation(
         description=ev.description,
         duration=ev.duration,
         questions=[],
+        scheduled_starts_at=ev.scheduled_starts_at,
+        scheduled_ends_at=ev.scheduled_ends_at,
+        question_count=nq,
+        schedule_access_blocked=not open_now,
+        schedule_block_kind=kind,
+        schedule_block_message=msg,
     )
 
 

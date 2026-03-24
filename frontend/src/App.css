@@ -1049,6 +1049,31 @@ html[data-theme="light"] {
   margin: 0.35rem 0;
 }
 
+.schedule-row-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.public-exam-schedule-wait .public-schedule-wait-title {
+  margin: 1.25rem 0 0.5rem;
+  font-size: 1.2rem;
+}
+
+.public-exam-schedule-wait .public-schedule-countdown {
+  font-size: 1.25rem;
+  margin: 0.75rem 0;
+}
+
+.public-exam-schedule-wait .public-schedule-countdown strong {
+  font-variant-numeric: tabular-nums;
+}
+
+.public-exam-schedule-ended h2 {
+  margin: 1rem 0 0.5rem;
+  font-size: 1.15rem;
+}
+
 .answer-section {
   display: flex;
   flex-direction: column;

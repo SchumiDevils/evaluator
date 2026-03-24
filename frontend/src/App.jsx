@@ -503,9 +503,16 @@ function App() {
         /* ignore */
       }
     }
-    const id = setInterval(poll, 7000)
+    const id = setInterval(poll, 4000)
     poll()
-    return () => clearInterval(id)
+    const onVis = () => {
+      if (document.visibilityState === 'visible') poll()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => {
+      clearInterval(id)
+      document.removeEventListener('visibilitychange', onVis)
+    }
   }, [
     view,
     user?.role,
@@ -1692,9 +1699,10 @@ function App() {
                     <span><Icons.People /> Răspunsuri:</span>
                     <strong>{selectedAssessment.response_count}</strong>
                   </div>
-                  {(selectedAssessment.scheduled_starts_at || selectedAssessment.scheduled_ends_at) && (
+                  {((selectedAssessment.scheduled_starts_at || selectedAssessment.scheduled_ends_at) ||
+                    (!isOwner && selectedAssessment.schedule_access_blocked)) && (
                     <div className="info-row info-row--block">
-                      <span>Programare acces:</span>
+                      <span>Programare acces (închidere/deschidere):</span>
                       <strong className="schedule-detail">
                         {selectedAssessment.scheduled_starts_at
                           ? new Date(selectedAssessment.scheduled_starts_at).toLocaleString('ro-RO', {
@@ -1710,6 +1718,9 @@ function App() {
                             })
                           : '—'}
                       </strong>
+                      {!isOwner && selectedAssessment.schedule_access_blocked && selectedAssessment.schedule_block_message && (
+                        <p className="text-muted schedule-row-hint">{selectedAssessment.schedule_block_message}</p>
+                      )}
                     </div>
                   )}
                   <div className="info-row">
