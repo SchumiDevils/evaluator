@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -24,6 +25,8 @@ from ..schemas.auth import (
 from ..schemas.user import UserCreate, UserProfileUpdate, UserRead, user_to_read
 from ..services.email_smtp import send_password_reset_email
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 settings = get_settings()
@@ -39,7 +42,12 @@ async def _get_user_by_email(session: AsyncSession, email: str) -> Optional[User
 
 
 def _send_reset_email_task(to_email: str, reset_url: str) -> None:
-    send_password_reset_email(to_email, reset_url, get_settings())
+    logger.info("forgot-password: attempting to send reset email to %s", to_email)
+    try:
+        send_password_reset_email(to_email, reset_url, get_settings())
+        logger.info("forgot-password: reset email sent to %s", to_email)
+    except Exception:
+        logger.exception("forgot-password: failed to send reset email to %s", to_email)
 
 
 def _token_expired(expires_at: datetime) -> bool:
@@ -57,21 +65,35 @@ async def forgot_password(
 ) -> MessageResponse:
     """Nu dezvăluie dacă emailul există; trimite email (sau log în dev) dacă există cont."""
     email_norm = body.email.strip().lower()
+    logger.info("forgot-password requested for email=%s", email_norm)
+
     user = await _get_user_by_email(session, email_norm)
     msg = (
         "Dacă există un cont asociat acestui email, vei primi în scurt timp instrucțiuni "
         "pentru resetarea parolei."
     )
-    if user:
-        await session.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id))
-        raw = secrets.token_urlsafe(32)
-        token_hash = hashlib.sha256(raw.encode()).hexdigest()
-        expires = datetime.now(timezone.utc) + timedelta(minutes=settings.password_reset_token_expire_minutes)
-        session.add(PasswordResetToken(user_id=user.id, token_hash=token_hash, expires_at=expires))
-        await session.commit()
-        base = settings.frontend_base_url.rstrip("/")
-        reset_url = f"{base}/?reset={raw}"
-        background_tasks.add_task(_send_reset_email_task, user.email, reset_url)
+    if not user:
+        logger.info("forgot-password: no user found for email=%s", email_norm)
+        return MessageResponse(message=msg)
+
+    logger.info("forgot-password: user found id=%s email=%s", user.id, user.email)
+    logger.info("forgot-password: generating reset token for user id=%s", user.id)
+
+    await session.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id))
+    raw = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw.encode()).hexdigest()
+    expires = datetime.now(timezone.utc) + timedelta(minutes=settings.password_reset_token_expire_minutes)
+    session.add(PasswordResetToken(user_id=user.id, token_hash=token_hash, expires_at=expires))
+    await session.commit()
+
+    base = settings.frontend_base_url.rstrip("/")
+    reset_url = f"{base}/?reset={raw}"
+    logger.info(
+        "forgot-password: token saved for user id=%s, queueing email send to %s",
+        user.id,
+        user.email,
+    )
+    background_tasks.add_task(_send_reset_email_task, user.email, reset_url)
     return MessageResponse(message=msg)
 
 
