@@ -44,6 +44,18 @@ class Settings(BaseSettings):
         description="Regex for extra allowed origins (Vercel frontends).",
     )
 
+    # Resetare parolă: URL-ul frontend pentru linkul din email (?reset=...)
+    frontend_base_url: str = "http://localhost:5173"
+    password_reset_token_expire_minutes: int = 60
+
+    # SMTP opțional; dacă lipsește smtp_host, linkul se loghează (doar pentru dev).
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_from: Optional[str] = None
+    smtp_use_tls: bool = True
+
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
 
 

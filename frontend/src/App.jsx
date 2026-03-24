@@ -350,8 +350,16 @@ function parsePublicLinkFromPath() {
   return m ? m[1] : null
 }
 
+/** Token din linkul din email: /?reset=... */
+function parseResetTokenFromUrl() {
+  if (typeof window === 'undefined') return null
+  const q = new URLSearchParams(window.location.search).get('reset')
+  return q && q.length >= 10 ? q : null
+}
+
 function App() {
   const [publicLinkId] = useState(parsePublicLinkFromPath)
+  const [urlResetToken, setUrlResetToken] = useState(parseResetTokenFromUrl)
   const [token, setToken] = useState(() => localStorage.getItem('auth_token') ?? '')
   const [user, setUser] = useState(null)
   const [view, setView] = useState('dashboard')
@@ -367,6 +375,9 @@ function App() {
   const [authMode, setAuthMode] = useState('login')
   const [authForm, setAuthForm] = useState(initialAuthState)
   const [authError, setAuthError] = useState('')
+  const [forgotPasswordMessage, setForgotPasswordMessage] = useState('')
+  const [resetNewPassword, setResetNewPassword] = useState('')
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('')
   const [isAuthLoading, setIsAuthLoading] = useState(false)
 
   // Assessment form state
@@ -751,6 +762,78 @@ function App() {
       const data = await res.json()
       setToken(data.access_token)
       setAuthForm(initialAuthState)
+    } catch (err) {
+      setAuthError(err.message)
+    } finally {
+      setIsAuthLoading(false)
+    }
+  }
+
+  const handleForgotSubmit = async (e) => {
+    e.preventDefault()
+    setAuthError('')
+    setForgotPasswordMessage('')
+    setIsAuthLoading(true)
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authForm.email.trim() })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const d = data.detail
+        throw new Error(typeof d === 'string' ? d : 'Cererea a eșuat.')
+      }
+      setForgotPasswordMessage(data.message ?? '')
+      setAuthForm((p) => ({ ...p, password: '' }))
+    } catch (err) {
+      setAuthError(err.message)
+    } finally {
+      setIsAuthLoading(false)
+    }
+  }
+
+  const handleResetPasswordSubmit = async (e) => {
+    e.preventDefault()
+    setAuthError('')
+    setForgotPasswordMessage('')
+    if (resetNewPassword.length < 6) {
+      setAuthError('Parola trebuie să aibă cel puțin 6 caractere.')
+      return
+    }
+    if (resetNewPassword !== resetConfirmPassword) {
+      setAuthError('Parolele nu coincid.')
+      return
+    }
+    if (!urlResetToken) {
+      setAuthError('Linkul de resetare lipsește. Deschide din nou linkul din email.')
+      return
+    }
+    setIsAuthLoading(true)
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/auth/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: urlResetToken, new_password: resetNewPassword })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const d = data.detail
+        throw new Error(typeof d === 'string' ? d : 'Resetarea a eșuat.')
+      }
+      if (typeof window !== 'undefined') {
+        const u = new URL(window.location.href)
+        u.searchParams.delete('reset')
+        const tail = u.search ? u.search + u.hash : u.hash
+        window.history.replaceState({}, '', u.pathname + tail)
+      }
+      setUrlResetToken(null)
+      setResetNewPassword('')
+      setResetConfirmPassword('')
+      setAuthMode('login')
+      setForgotPasswordMessage(data.message ?? 'Parola a fost actualizată.')
+      setAuthForm((p) => ({ ...p, password: '' }))
     } catch (err) {
       setAuthError(err.message)
     } finally {
@@ -1527,67 +1610,197 @@ function App() {
             <RubrixDrawTitle />
           </div>
           <div className="auth-card">
-            <div className="auth-tabs">
-              <button
-                className={authMode === 'login' ? 'active' : ''}
-                onClick={() => setAuthMode('login')}
-              >
-                Sign In
-              </button>
-              <button
-                className={authMode === 'register' ? 'active' : ''}
-                onClick={() => setAuthMode('register')}
-              >
-                Sign Up
-              </button>
-            </div>
-            <form onSubmit={handleAuthSubmit}>
-              {authMode === 'register' && (
-                <>
+            {urlResetToken ? (
+              <>
+                <h2 className="auth-card-title">Parolă nouă</h2>
+                <p className="text-muted auth-card-intro">
+                  Alege o parolă nouă pentru contul tău. După salvare te poți autentifica cu ea.
+                </p>
+                <form onSubmit={handleResetPasswordSubmit}>
                   <label>
-                    Nume complet
+                    Parolă nouă
                     <input
-                      type="text"
-                      value={authForm.fullName}
-                      onChange={handleAuthChange('fullName')}
-                      placeholder="Ion Popescu"
+                      type="password"
+                      value={resetNewPassword}
+                      onChange={(e) => setResetNewPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                      minLength={6}
+                      autoComplete="new-password"
                     />
                   </label>
                   <label>
-                    Rol
-                    <select value={authForm.role} onChange={handleAuthChange('role')}>
-                      <option value="student">Student</option>
-                      <option value="professor">Profesor</option>
-                    </select>
+                    Confirmă parola
+                    <input
+                      type="password"
+                      value={resetConfirmPassword}
+                      onChange={(e) => setResetConfirmPassword(e.target.value)}
+                      placeholder="••••••••"
+                      required
+                      minLength={6}
+                      autoComplete="new-password"
+                    />
                   </label>
-                </>
-              )}
-              <label>
-                Email
-                <input
-                  type="email"
-                  value={authForm.email}
-                  onChange={handleAuthChange('email')}
-                  placeholder="email@universitate.ro"
-                  required
-                />
-              </label>
-              <label>
-                Parolă
-                <input
-                  type="password"
-                  value={authForm.password}
-                  onChange={handleAuthChange('password')}
-                  placeholder="••••••••"
-                  required
-                  minLength={6}
-                />
-              </label>
-              {authError && <p className="error-msg">{authError}</p>}
-              <button type="submit" className="btn-primary" disabled={isAuthLoading}>
-                {isAuthLoading ? 'Se procesează...' : authMode === 'login' ? 'Intră în cont' : 'Creează cont'}
-              </button>
-            </form>
+                  {authError && <p className="error-msg">{authError}</p>}
+                  {forgotPasswordMessage && <p className="auth-success-msg">{forgotPasswordMessage}</p>}
+                  <button type="submit" className="btn-primary" disabled={isAuthLoading}>
+                    {isAuthLoading ? 'Se salvează...' : 'Salvează parola'}
+                  </button>
+                  <div className="auth-form-extras" style={{ justifyContent: 'flex-start', marginTop: '1rem' }}>
+                    <button
+                      type="button"
+                      className="auth-text-link"
+                      onClick={() => {
+                        setUrlResetToken(null)
+                        setAuthError('')
+                        setForgotPasswordMessage('')
+                        if (typeof window !== 'undefined') {
+                          const u = new URL(window.location.href)
+                          u.searchParams.delete('reset')
+                          const tail = u.search ? u.search + u.hash : u.hash
+                          window.history.replaceState({}, '', u.pathname + tail)
+                        }
+                        setAuthMode('login')
+                      }}
+                    >
+                      ← Înapoi la autentificare
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : (
+              <>
+                <div className="auth-tabs">
+                  <button
+                    type="button"
+                    className={authMode === 'login' ? 'active' : ''}
+                    onClick={() => {
+                      setAuthMode('login')
+                      setAuthError('')
+                      setForgotPasswordMessage('')
+                    }}
+                  >
+                    Sign In
+                  </button>
+                  <button
+                    type="button"
+                    className={authMode === 'register' ? 'active' : ''}
+                    onClick={() => {
+                      setAuthMode('register')
+                      setAuthError('')
+                      setForgotPasswordMessage('')
+                    }}
+                  >
+                    Sign Up
+                  </button>
+                </div>
+                {authMode === 'forgot' ? (
+                  <form onSubmit={handleForgotSubmit}>
+                    <p className="text-muted auth-card-intro" style={{ marginTop: 0 }}>
+                      Introdu adresa de email a contului. Dacă există un utilizator înregistrat, vei primi un mesaj cu un
+                      link pentru resetarea parolei.
+                    </p>
+                    <label>
+                      Email
+                      <input
+                        type="email"
+                        value={authForm.email}
+                        onChange={handleAuthChange('email')}
+                        placeholder="email@universitate.ro"
+                        required
+                        autoComplete="email"
+                      />
+                    </label>
+                    {authError && <p className="error-msg">{authError}</p>}
+                    {forgotPasswordMessage && <p className="auth-success-msg">{forgotPasswordMessage}</p>}
+                    <button type="submit" className="btn-primary" disabled={isAuthLoading}>
+                      {isAuthLoading ? 'Se trimite...' : 'Trimite link de resetare'}
+                    </button>
+                    <div className="auth-form-extras" style={{ justifyContent: 'flex-start', marginTop: '1rem' }}>
+                      <button
+                        type="button"
+                        className="auth-text-link"
+                        onClick={() => {
+                          setAuthMode('login')
+                          setAuthError('')
+                          setForgotPasswordMessage('')
+                        }}
+                      >
+                        ← Înapoi la autentificare
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <form onSubmit={handleAuthSubmit}>
+                    {authMode === 'register' && (
+                      <>
+                        <label>
+                          Nume complet
+                          <input
+                            type="text"
+                            value={authForm.fullName}
+                            onChange={handleAuthChange('fullName')}
+                            placeholder="Ion Popescu"
+                          />
+                        </label>
+                        <label>
+                          Rol
+                          <select value={authForm.role} onChange={handleAuthChange('role')}>
+                            <option value="student">Student</option>
+                            <option value="professor">Profesor</option>
+                          </select>
+                        </label>
+                      </>
+                    )}
+                    <label>
+                      Email
+                      <input
+                        type="email"
+                        value={authForm.email}
+                        onChange={handleAuthChange('email')}
+                        placeholder="email@universitate.ro"
+                        required
+                        autoComplete="email"
+                      />
+                    </label>
+                    <label>
+                      Parolă
+                      <input
+                        type="password"
+                        value={authForm.password}
+                        onChange={handleAuthChange('password')}
+                        placeholder="••••••••"
+                        required
+                        minLength={6}
+                        autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+                      />
+                    </label>
+                    {authMode === 'login' && (
+                      <div className="auth-form-extras">
+                        <button
+                          type="button"
+                          className="auth-text-link"
+                          onClick={() => {
+                            setAuthMode('forgot')
+                            setAuthError('')
+                            setForgotPasswordMessage('')
+                          }}
+                        >
+                          Ai uitat parola?
+                        </button>
+                      </div>
+                    )}
+                    {authError && <p className="error-msg">{authError}</p>}
+                    {forgotPasswordMessage && authMode === 'login' && (
+                      <p className="auth-success-msg">{forgotPasswordMessage}</p>
+                    )}
+                    <button type="submit" className="btn-primary" disabled={isAuthLoading}>
+                      {isAuthLoading ? 'Se procesează...' : authMode === 'login' ? 'Intră în cont' : 'Creează cont'}
+                    </button>
+                  </form>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>

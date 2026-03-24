@@ -1,20 +1,28 @@
 from __future__ import annotations
 
-from datetime import timedelta
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response as StarletteResponse
 
 from ..core.config import get_settings
 from ..core.security import create_access_token, get_password_hash, verify_password
 from ..db.session import get_session
-from ..models import User, UserRole
-from ..schemas.auth import Token
+from ..models import PasswordResetToken, User, UserRole
+from ..schemas.auth import (
+    ForgotPasswordRequest,
+    MessageResponse,
+    ResetPasswordRequest,
+    Token,
+)
 from ..schemas.user import UserCreate, UserProfileUpdate, UserRead, user_to_read
+from ..services.email_smtp import send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -28,6 +36,68 @@ _AVATAR_MIMES = frozenset({"image/jpeg", "image/png", "image/webp", "image/gif"}
 async def _get_user_by_email(session: AsyncSession, email: str) -> Optional[User]:
     result = await session.execute(select(User).where(User.email == email.lower()))
     return result.scalar_one_or_none()
+
+
+def _send_reset_email_task(to_email: str, reset_url: str) -> None:
+    send_password_reset_email(to_email, reset_url, get_settings())
+
+
+def _token_expired(expires_at: datetime) -> bool:
+    now = datetime.now(timezone.utc)
+    if expires_at.tzinfo is None:
+        return expires_at.replace(tzinfo=timezone.utc) < now
+    return expires_at < now
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    session: AsyncSession = Depends(get_session),
+) -> MessageResponse:
+    """Nu dezvăluie dacă emailul există; trimite email (sau log în dev) dacă există cont."""
+    email_norm = body.email.strip().lower()
+    user = await _get_user_by_email(session, email_norm)
+    msg = (
+        "Dacă există un cont asociat acestui email, vei primi în scurt timp instrucțiuni "
+        "pentru resetarea parolei."
+    )
+    if user:
+        await session.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id))
+        raw = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(raw.encode()).hexdigest()
+        expires = datetime.now(timezone.utc) + timedelta(minutes=settings.password_reset_token_expire_minutes)
+        session.add(PasswordResetToken(user_id=user.id, token_hash=token_hash, expires_at=expires))
+        await session.commit()
+        base = settings.frontend_base_url.rstrip("/")
+        reset_url = f"{base}/?reset={raw}"
+        background_tasks.add_task(_send_reset_email_task, user.email, reset_url)
+    return MessageResponse(message=msg)
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(body: ResetPasswordRequest, session: AsyncSession = Depends(get_session)) -> MessageResponse:
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
+    result = await session.execute(select(PasswordResetToken).where(PasswordResetToken.token_hash == token_hash))
+    row = result.scalar_one_or_none()
+    invalid_msg = "Linkul de resetare nu este valid sau a expirat. Solicită din nou resetarea parolei."
+    if not row or _token_expired(row.expires_at):
+        if row:
+            await session.delete(row)
+            await session.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=invalid_msg)
+
+    user_result = await session.execute(select(User).where(User.id == row.user_id))
+    user = user_result.scalar_one_or_none()
+    if not user:
+        await session.delete(row)
+        await session.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=invalid_msg)
+
+    user.hashed_password = get_password_hash(body.new_password)
+    await session.delete(row)
+    await session.commit()
+    return MessageResponse(message="Parola a fost actualizată. Te poți autentifica cu noua parolă.")
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
