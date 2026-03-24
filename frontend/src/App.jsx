@@ -25,6 +25,40 @@ function isoToDatetimeLocalValue(iso) {
 }
 
 /** Etichetă scurtă pentru carduri (profesor): starea ferestrei de programare */
+function getEvaluationQuestionCount(a) {
+  if (a == null) return 0
+  if (typeof a.question_count === 'number') return a.question_count
+  return (a.questions || []).length
+}
+
+/** Text dinamic: „peste 2 min 15s” până la ISO start */
+function formatCountdownToStart(iso) {
+  if (!iso) return ''
+  const end = new Date(iso).getTime()
+  const t = end - Date.now()
+  if (t <= 0) return 'Se deschide acum…'
+  const s = Math.floor(t / 1000)
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (d > 0) return `${d} zile, ${h} h`
+  if (h > 0) return `${h} h ${m} min`
+  if (m > 0) return `${m} min ${sec} s`
+  return `${sec} s`
+}
+
+function studentCardScheduleLine(a) {
+  if (!a?.schedule_access_blocked) return null
+  if (a.schedule_block_kind === 'before_start' && a.scheduled_starts_at) {
+    return `Începe la ${new Date(a.scheduled_starts_at).toLocaleString('ro-RO', { dateStyle: 'short', timeStyle: 'short' })}`
+  }
+  if (a.schedule_block_kind === 'after_end') {
+    return 'Perioada de acces s-a încheiat'
+  }
+  return a.schedule_block_message || null
+}
+
 function formatEvaluationScheduleLabel({ status, scheduled_starts_at, scheduled_ends_at }) {
   if (status !== 'active') return null
   if (!scheduled_starts_at && !scheduled_ends_at) return null
@@ -320,6 +354,8 @@ function App() {
   // Timer state
   const [timeRemaining, setTimeRemaining] = useState(null)
   const [timerExpired, setTimerExpired] = useState(false)
+  /** Re-render pentru countdown „începe în X” pe pagina de detaliu */
+  const [scheduleTick, setScheduleTick] = useState(0)
   const timerRef = useRef(null)
   const autoSubmitRef = useRef(false)
 
@@ -386,7 +422,12 @@ function App() {
 
   // Auto-submit when timer expires
   useEffect(() => {
-    if (timerExpired && autoSubmitRef.current && selectedAssessment) {
+    if (
+      timerExpired &&
+      autoSubmitRef.current &&
+      selectedAssessment &&
+      !selectedAssessment.schedule_access_blocked
+    ) {
       autoSubmitRef.current = false
       const questions = selectedAssessment.questions || []
       const hasAnyAnswer = questions.some((q) => answers[q.id]?.trim())
@@ -406,6 +447,73 @@ function App() {
       }
     }
   }, [timerExpired])
+
+  useEffect(() => {
+    if (
+      view !== 'detail' ||
+      !selectedAssessment?.schedule_access_blocked ||
+      selectedAssessment.schedule_block_kind !== 'before_start'
+    ) {
+      return
+    }
+    const id = setInterval(() => setScheduleTick((x) => x + 1), 1000)
+    return () => clearInterval(id)
+  }, [view, selectedAssessment?.id, selectedAssessment?.schedule_access_blocked, selectedAssessment?.schedule_block_kind])
+
+  useEffect(() => {
+    if (view !== 'detail' || user?.role === 'professor' || !token || !selectedAssessment) return
+    if (
+      !selectedAssessment.schedule_access_blocked ||
+      selectedAssessment.schedule_block_kind !== 'before_start'
+    ) {
+      return
+    }
+    const evalId = selectedAssessment.id
+    const poll = async () => {
+      try {
+        const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/${evalId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        if (!data.schedule_access_blocked) {
+          setSelectedAssessment(data)
+          setError('')
+          try {
+            const srRes = await fetch(`${API_URL}${API_PREFIX}/evaluations/${evalId}/start`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}` },
+            })
+            if (srRes.ok) {
+              const { seconds_remaining } = await srRes.json()
+              if (seconds_remaining <= 0) {
+                setTimeRemaining(0)
+                setTimerExpired(true)
+              } else {
+                setTimeRemaining(seconds_remaining)
+                setTimerExpired(false)
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+          autoSubmitRef.current = false
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    const id = setInterval(poll, 7000)
+    poll()
+    return () => clearInterval(id)
+  }, [
+    view,
+    user?.role,
+    token,
+    selectedAssessment?.id,
+    selectedAssessment?.schedule_access_blocked,
+    selectedAssessment?.schedule_block_kind,
+  ])
 
   const fetchProfile = useCallback(async () => {
     if (!token) {
@@ -864,6 +972,7 @@ function App() {
   }
 
   const handleOpenAssessment = async (assessment) => {
+    setError('')
     setSelectedAssessment(assessment)
     setAnswers({})
     setFeedbackResults({})
@@ -876,72 +985,91 @@ function App() {
 
     const isOwner = user?.role === 'professor' && assessment.author_id === user?.id
 
-    if (!isOwner && assessment.duration) {
+    if (isOwner) {
+      setTimeRemaining(null)
+      setTimerExpired(false)
+      autoSubmitRef.current = false
+      await fetchStudentResponses(assessment.id)
+      return
+    }
+
+    let latest = assessment
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/${assessment.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        latest = await res.json()
+        setSelectedAssessment(latest)
+      }
+    } catch {
+      /* păstrăm snapshot-ul din listă */
+    }
+
+    if (latest.schedule_access_blocked) {
+      setTimeRemaining(null)
+      setTimerExpired(false)
+      autoSubmitRef.current = false
+    } else if (latest.duration) {
       try {
-        const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/${assessment.id}/start`, {
+        const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/${latest.id}/start`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${token}` },
         })
         if (res.ok) {
           const { seconds_remaining } = await res.json()
           if (seconds_remaining <= 0) {
             setTimeRemaining(0)
             setTimerExpired(true)
-            autoSubmitRef.current = false
           } else {
             setTimeRemaining(seconds_remaining)
             setTimerExpired(false)
-            autoSubmitRef.current = false
           }
         } else {
-          setTimeRemaining(assessment.duration * 60)
+          setTimeRemaining(null)
           setTimerExpired(false)
-          autoSubmitRef.current = false
         }
       } catch {
-        setTimeRemaining(assessment.duration * 60)
+        setTimeRemaining(null)
         setTimerExpired(false)
-        autoSubmitRef.current = false
       }
+      autoSubmitRef.current = false
     } else {
       setTimeRemaining(null)
       setTimerExpired(false)
+      autoSubmitRef.current = false
     }
 
-    if (isOwner) {
-      await fetchStudentResponses(assessment.id)
-    } else {
-      const loadedResponses = await fetchMyResponses(assessment.id)
-      if (loadedResponses?.length) {
-        const latestByQuestion = loadedResponses.reduce((acc, response) => {
-          if (!response.question_id) return acc
-          if (!acc[response.question_id]) {
-            acc[response.question_id] = response
-          }
-          return acc
-        }, {})
-
-        const existingAnswers = {}
-        const existingFeedback = {}
-        for (const [questionId, response] of Object.entries(latestByQuestion)) {
-          existingAnswers[questionId] = response.answer_text || ''
-          existingFeedback[questionId] = {
-            response_id: response.id,
-            score: response.score,
-            is_correct: response.is_correct,
-            feedback: response.feedback || [],
-          }
+    const loadedResponses = await fetchMyResponses(assessment.id)
+    if (loadedResponses?.length) {
+      const latestByQuestion = loadedResponses.reduce((acc, response) => {
+        if (!response.question_id) return acc
+        if (!acc[response.question_id]) {
+          acc[response.question_id] = response
         }
+        return acc
+      }, {})
 
-        setAnswers(existingAnswers)
-        setFeedbackResults(existingFeedback)
-
-        const totalQuestions = (assessment.questions || []).length
-        const submittedCount = Object.keys(existingFeedback).length
-        if (submittedCount >= totalQuestions && totalQuestions > 0) {
-          clearInterval(timerRef.current)
-          setTimeRemaining(null)
+      const existingAnswers = {}
+      const existingFeedback = {}
+      for (const [questionId, response] of Object.entries(latestByQuestion)) {
+        existingAnswers[questionId] = response.answer_text || ''
+        existingFeedback[questionId] = {
+          response_id: response.id,
+          score: response.score,
+          is_correct: response.is_correct,
+          feedback: response.feedback || [],
         }
+      }
+
+      setAnswers(existingAnswers)
+      setFeedbackResults(existingFeedback)
+
+      const totalQuestions = getEvaluationQuestionCount(latest)
+      const submittedCount = Object.keys(existingFeedback).length
+      if (submittedCount >= totalQuestions && totalQuestions > 0) {
+        clearInterval(timerRef.current)
+        setTimeRemaining(null)
       }
     }
   }
@@ -1440,8 +1568,9 @@ function App() {
   // Assessment Detail view
   if (view === 'detail' && selectedAssessment) {
     const isOwner = user?.role === 'professor' && selectedAssessment.author_id === user?.id
-    const canAnswer = !isOwner
-    const totalQuestions = (selectedAssessment.questions || []).length
+    const scheduleBlocked = Boolean(!isOwner && selectedAssessment.schedule_access_blocked)
+    const canAnswer = !isOwner && !scheduleBlocked
+    const totalQuestions = getEvaluationQuestionCount(selectedAssessment)
     const submittedQuestionsCount = Object.keys(feedbackResults).length
     const allQuestionsSubmitted = totalQuestions > 0 && submittedQuestionsCount >= totalQuestions
 
@@ -1526,6 +1655,24 @@ function App() {
                   <h3>Descriere</h3>
                   <p>{selectedAssessment.description || 'Nicio descriere disponibilă.'}</p>
                 </ParticleCard>
+                {scheduleBlocked && selectedAssessment.schedule_block_kind === 'before_start' && (
+                  <ParticleCard className="info-card magic-bento-card magic-bento-card--border-glow schedule-countdown-card" disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+                    <h3>Începe în curând</h3>
+                    <p className="schedule-countdown-large" key={scheduleTick}>
+                      {formatCountdownToStart(selectedAssessment.scheduled_starts_at)}
+                    </p>
+                    <p className="text-muted schedule-countdown-sub">
+                      La ora programată vei putea vedea întrebările și vei avea {selectedAssessment.duration} minute pentru completare.
+                      Pagina se reîncarcă singură la deschiderea ferestrei.
+                    </p>
+                  </ParticleCard>
+                )}
+                {scheduleBlocked && selectedAssessment.schedule_block_kind === 'after_end' && (
+                  <ParticleCard className="info-card magic-bento-card magic-bento-card--border-glow schedule-ended-sidebar-card" disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
+                    <h3>Fereastra s-a încheiat</h3>
+                    <p className="text-muted">{selectedAssessment.schedule_block_message}</p>
+                  </ParticleCard>
+                )}
                 {canAnswer && timeRemaining !== null && (
                   <ParticleCard className="info-card magic-bento-card magic-bento-card--border-glow" disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
                     <AnimeTimer
@@ -1567,7 +1714,7 @@ function App() {
                   )}
                   <div className="info-row">
                     <span><Icons.Document /> Exerciții:</span>
-                    <strong>{(selectedAssessment.questions || []).length}</strong>
+                    <strong>{totalQuestions}</strong>
                   </div>
                   {canAnswer && (
                     <div className="info-row">
@@ -1620,9 +1767,39 @@ function App() {
               </div>
 
               <div className="detail-questions">
-                {(!selectedAssessment.questions || selectedAssessment.questions.length === 0) ? (
+                {totalQuestions === 0 ? (
                   <div className="info-card">
                     <p className="text-muted">Această evaluare nu conține exerciții.</p>
+                  </div>
+                ) : scheduleBlocked && selectedAssessment.schedule_block_kind === 'before_start' ? (
+                  <div className="info-card schedule-main-wait">
+                    <h2>Evaluarea nu a început încă</h2>
+                    <p className="schedule-main-countdown" aria-live="polite" key={scheduleTick}>
+                      Rămâne: <strong>{formatCountdownToStart(selectedAssessment.scheduled_starts_at)}</strong>
+                    </p>
+                    <p className="text-muted">
+                      Start oficial:{' '}
+                      {selectedAssessment.scheduled_starts_at
+                        ? new Date(selectedAssessment.scheduled_starts_at).toLocaleString('ro-RO', {
+                            dateStyle: 'full',
+                            timeStyle: 'short',
+                          })
+                        : '—'}
+                    </p>
+                    <p className="text-muted">
+                      Această evaluare are {totalQuestions} exerciții. Întrebările vor apărea aici automat la începutul ferestrei
+                      (nu este nevoie să reîncarci manual pagina).
+                    </p>
+                  </div>
+                ) : scheduleBlocked && selectedAssessment.schedule_block_kind === 'after_end' ? (
+                  <div className="info-card schedule-main-ended">
+                    <h2>Perioada de evaluare s-a încheiat</h2>
+                    <p className="text-muted">{selectedAssessment.schedule_block_message}</p>
+                    <p className="text-muted">Nu mai poți trimite răspunsuri noi pentru această sesiune.</p>
+                  </div>
+                ) : scheduleBlocked ? (
+                  <div className="info-card">
+                    <p className="text-muted">{selectedAssessment.schedule_block_message || 'Evaluarea nu este disponibilă în acest moment.'}</p>
                   </div>
                 ) : canAnswer ? (
                   <form onSubmit={handleSubmitAllAnswers}>
@@ -1633,7 +1810,7 @@ function App() {
                     )}
                     {timerExpired && Object.keys(feedbackResults).length === 0 && (
                       <div className="timer-expired-banner">
-                        Timpul a expirat! Nu mai poți modifica răspunsurile.
+                        Timpul alocat pentru această evaluare ({selectedAssessment.duration} minute) a expirat. Nu mai poți modifica sau trimite răspunsuri.
                       </div>
                     )}
                     {selectedAssessment.questions.map((q, idx) => {
@@ -2651,6 +2828,7 @@ function App() {
           ) : (
             filteredAssessments.map((assessment) => {
               const scheduleHint = isProfessor ? formatEvaluationScheduleLabel(assessment) : null
+              const studentScheduleLine = !isProfessor ? studentCardScheduleLine(assessment) : null
               return (
               <ParticleCard
                 className="assessment-card magic-bento-card magic-bento-card--border-glow"
@@ -2678,6 +2856,9 @@ function App() {
                   {scheduleHint && (
                     <p className="card-schedule-hint text-muted">{scheduleHint}</p>
                   )}
+                  {studentScheduleLine && (
+                    <p className="card-schedule-student text-muted">{studentScheduleLine}</p>
+                  )}
                   <p className="card-description">
                     {assessment.description || 'Nicio descriere disponibilă'}
                   </p>
@@ -2699,7 +2880,7 @@ function App() {
                       {!isProfessor && (
                         <span>
                           <Icons.Document />
-                          {(assessment.questions || []).length} exerciții
+                          {getEvaluationQuestionCount(assessment)} exerciții
                         </span>
                       )}
                     </div>

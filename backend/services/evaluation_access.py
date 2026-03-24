@@ -32,3 +32,19 @@ def student_may_access_evaluation(ev: Evaluation, now: Optional[datetime] = None
         return False
     now = now or datetime.now(timezone.utc)
     return schedule_blocks_access(ev, now) is None
+
+
+def schedule_block_kind(ev: Evaluation, now: Optional[datetime] = None) -> Optional[str]:
+    """Înainte/după fereastra programată (evaluare activă). None dacă nu e blocată de programare."""
+    if ev.status != "active":
+        return None
+    now = now or datetime.now(timezone.utc)
+    if student_may_access_evaluation(ev, now):
+        return None
+    start = dt_utc(ev.scheduled_starts_at)
+    end = dt_utc(ev.scheduled_ends_at)
+    if start is not None and now < start:
+        return "before_start"
+    if end is not None and now > end:
+        return "after_end"
+    return None

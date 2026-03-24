@@ -8,7 +8,7 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import Response as HttpPdfResponse
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -32,7 +32,11 @@ from ..schemas.feedback import (
     ProfessorFeedbackUpdate,
     ResponseRead,
 )
-from ..services.evaluation_access import schedule_blocks_access, student_may_access_evaluation
+from ..services.evaluation_access import (
+    schedule_block_kind,
+    schedule_blocks_access,
+    student_may_access_evaluation,
+)
 from ..services.evaluation_pdf import build_evaluation_results_pdf
 from ..services.feedback_service import generate_and_store_feedback
 from .auth import get_current_user
@@ -94,6 +98,10 @@ class EvaluationRead(BaseModel):
     status: str
     scheduled_starts_at: Optional[datetime] = None
     scheduled_ends_at: Optional[datetime] = None
+    question_count: int = 0
+    schedule_access_blocked: bool = False
+    schedule_block_message: Optional[str] = None
+    schedule_block_kind: Optional[str] = None  # before_start | after_end
     response_count: int = 0
     questions: List[QuestionRead] = []
     author_id: Optional[int] = None
@@ -285,6 +293,18 @@ async def _build_evaluation_read(
         author_result = await session.execute(select(User.full_name).where(User.id == ev.author_id))
         author_name = author_result.scalar()
 
+    q_reads = [
+        QuestionRead(
+            id=q.id,
+            order=q.order,
+            question_type=q.question_type,
+            text=q.text,
+            options=q.options,
+            correct_answer=q.correct_answer,
+            points=q.points,
+        )
+        for q in sorted(ev.questions, key=lambda q: q.order)
+    ]
     return EvaluationRead(
         id=ev.id,
         title=ev.title,
@@ -294,23 +314,38 @@ async def _build_evaluation_read(
         status=ev.status,
         scheduled_starts_at=ev.scheduled_starts_at,
         scheduled_ends_at=ev.scheduled_ends_at,
+        question_count=len(q_reads),
         response_count=response_count,
         author_id=ev.author_id,
         author_name=author_name,
         access_code=ev.access_code if include_access_secrets else None,
         public_link_id=ev.public_link_id if include_access_secrets else None,
-        questions=[
-            QuestionRead(
-                id=q.id,
-                order=q.order,
-                question_type=q.question_type,
-                text=q.text,
-                options=q.options,
-                correct_answer=q.correct_answer,
-                points=q.points,
-            )
-            for q in sorted(ev.questions, key=lambda q: q.order)
-        ],
+        questions=q_reads,
+    )
+
+
+def _apply_student_schedule_gate(read: EvaluationRead, ev: Evaluation, now: datetime) -> EvaluationRead:
+    """Studenți: ascunde întrebările în afara ferestrei de programare (nu leak înainte de start)."""
+    n = len(read.questions)
+    if student_may_access_evaluation(ev, now):
+        return read.model_copy(
+            update={
+                "question_count": n,
+                "schedule_access_blocked": False,
+                "schedule_block_message": None,
+                "schedule_block_kind": None,
+            }
+        )
+    kind = schedule_block_kind(ev, now)
+    msg = schedule_blocks_access(ev, now) or "Evaluarea nu este disponibilă în acest moment."
+    return read.model_copy(
+        update={
+            "questions": [],
+            "question_count": n,
+            "schedule_access_blocked": True,
+            "schedule_block_message": msg,
+            "schedule_block_kind": kind,
+        }
     )
 
 
@@ -380,7 +415,10 @@ async def join_evaluation_by_code(
         await session.commit()
         await session.refresh(ev)
     read = await _build_evaluation_read(session, ev, include_access_secrets=False)
-    return _shuffle_evaluation_questions_for_student(read, current_user.id)
+    read = _apply_student_schedule_gate(read, ev, datetime.now(timezone.utc))
+    if not read.schedule_access_blocked:
+        read = _shuffle_evaluation_questions_for_student(read, current_user.id)
+    return read
 
 
 @router.post("/public/{public_link_id}/start", response_model=PublicStartRead)
@@ -581,14 +619,11 @@ async def list_evaluations(
         subq = select(EvaluationEnrollment.evaluation_id).where(
             EvaluationEnrollment.user_id == current_user.id
         )
-        now = datetime.now(timezone.utc)
         query = (
             select(Evaluation)
             .where(
                 Evaluation.status == "active",
                 Evaluation.id.in_(subq),
-                or_(Evaluation.scheduled_starts_at.is_(None), Evaluation.scheduled_starts_at <= now),
-                or_(Evaluation.scheduled_ends_at.is_(None), Evaluation.scheduled_ends_at >= now),
             )
             .options(selectinload(Evaluation.questions))
             .order_by(Evaluation.created_at.desc())
@@ -605,10 +640,14 @@ async def list_evaluations(
     evaluations = result.scalars().all()
 
     eval_list = []
+    now_student_gate = datetime.now(timezone.utc)
     for ev in evaluations:
         if current_user.role == UserRole.STUDENT:
             built = await _build_evaluation_read(session, ev, include_access_secrets=False)
-            eval_list.append(_shuffle_evaluation_questions_for_student(built, current_user.id))
+            built = _apply_student_schedule_gate(built, ev, now_student_gate)
+            if not built.schedule_access_blocked:
+                built = _shuffle_evaluation_questions_for_student(built, current_user.id)
+            eval_list.append(built)
         else:
             await _ensure_access_code(session, ev)
             eval_list.append(await _build_evaluation_read(session, ev, include_access_secrets=True))
@@ -1120,8 +1159,6 @@ async def get_evaluation(
     if not evaluation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
     if current_user.role == UserRole.STUDENT:
-        if not student_may_access_evaluation(evaluation, datetime.now(timezone.utc)):
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
         if not await _student_enrolled(session, current_user.id, evaluation_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -1135,7 +1172,9 @@ async def get_evaluation(
         await session.commit()
     read = await _build_evaluation_read(session, evaluation, include_access_secrets=include_secrets)
     if current_user.role == UserRole.STUDENT:
-        read = _shuffle_evaluation_questions_for_student(read, current_user.id)
+        read = _apply_student_schedule_gate(read, evaluation, datetime.now(timezone.utc))
+        if not read.schedule_access_blocked:
+            read = _shuffle_evaluation_questions_for_student(read, current_user.id)
     return read
 
 

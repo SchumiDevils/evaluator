@@ -1012,6 +1012,43 @@ html[data-theme="light"] {
   margin: -0.5rem 0 0.75rem;
 }
 
+.card-schedule-student {
+  font-size: 0.8125rem;
+  margin: -0.35rem 0 0.5rem;
+  font-weight: 500;
+  color: var(--warning, #fbbf24);
+}
+
+.schedule-countdown-large {
+  font-size: 1.75rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  margin: 0.5rem 0;
+  color: var(--text-primary);
+}
+
+.schedule-countdown-sub {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.schedule-main-wait h2,
+.schedule-main-ended h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.25rem;
+}
+
+.schedule-main-countdown {
+  font-size: 1.125rem;
+  margin: 0 0 1rem;
+}
+
+.schedule-main-wait .text-muted,
+.schedule-main-ended .text-muted {
+  margin: 0.35rem 0;
+}
+
 .answer-section {
   display: flex;
   flex-direction: column;
