@@ -33,8 +33,11 @@ from ..schemas.feedback import (
     ResponseRead,
 )
 from ..services.evaluation_access import (
+    exam_seconds_remaining,
+    lifecycle_enrichment,
     schedule_block_kind,
     schedule_blocks_access,
+    should_reset_attempt_start,
     student_may_access_evaluation,
 )
 from ..services.evaluation_pdf import build_evaluation_results_pdf
@@ -71,15 +74,17 @@ class EvaluationCreate(BaseModel):
     description: Optional[str] = None
     duration: int = 30
     status: str = "draft"
+    start_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
     scheduled_starts_at: Optional[datetime] = None
     scheduled_ends_at: Optional[datetime] = None
     questions: Optional[List[QuestionSchema]] = None
 
     @model_validator(mode="after")
     def validate_schedule(self) -> "EvaluationCreate":
-        if self.scheduled_starts_at is not None and self.scheduled_ends_at is not None:
-            s = self.scheduled_starts_at
-            e = self.scheduled_ends_at
+        s = self.start_at if self.start_at is not None else self.scheduled_starts_at
+        e = self.end_at if self.end_at is not None else self.scheduled_ends_at
+        if s is not None and e is not None:
             if s.tzinfo is None:
                 s = s.replace(tzinfo=timezone.utc)
             if e.tzinfo is None:
@@ -96,8 +101,14 @@ class EvaluationRead(BaseModel):
     description: Optional[str]
     duration: int
     status: str
+    start_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
     scheduled_starts_at: Optional[datetime] = None
     scheduled_ends_at: Optional[datetime] = None
+    lifecycle_status: str = "draft"
+    server_now: Optional[datetime] = None
+    seconds_until_start: Optional[int] = None
+    seconds_until_end: Optional[int] = None
     question_count: int = 0
     schedule_access_blocked: bool = False
     schedule_block_message: Optional[str] = None
@@ -128,8 +139,14 @@ class PublicEvaluationRead(BaseModel):
     description: Optional[str]
     duration: int
     questions: List[QuestionRead] = []
+    start_at: Optional[datetime] = None
+    end_at: Optional[datetime] = None
     scheduled_starts_at: Optional[datetime] = None
     scheduled_ends_at: Optional[datetime] = None
+    lifecycle_status: str = "draft"
+    server_now: Optional[datetime] = None
+    seconds_until_start: Optional[int] = None
+    seconds_until_end: Optional[int] = None
     question_count: int = 0
     schedule_access_blocked: bool = False
     schedule_block_kind: Optional[str] = None
@@ -144,6 +161,7 @@ class PublicStartRead(BaseModel):
     session_token: str
     seconds_remaining: int
     duration_minutes: int
+    server_now: datetime
     questions: List[QuestionRead]
 
 
@@ -275,20 +293,14 @@ def _public_feedback_response_from_response(resp: Response) -> FeedbackResponse:
     )
 
 
-def _public_seconds_remaining(started_at: datetime, duration_minutes: int) -> int:
-    """Seconds left for a public exam session (server clock)."""
-    mins = max(1, int(duration_minutes or 1))
-    total = mins * 60
-    now = datetime.now(timezone.utc)
-    if started_at.tzinfo is None:
-        started_at = started_at.replace(tzinfo=timezone.utc)
-    elapsed = (now - started_at).total_seconds()
-    return max(0, int(total - elapsed))
-
-
 async def _build_evaluation_read(
-    session: AsyncSession, ev: Evaluation, *, include_access_secrets: bool = False
+    session: AsyncSession,
+    ev: Evaluation,
+    *,
+    include_access_secrets: bool = False,
+    now: Optional[datetime] = None,
 ) -> EvaluationRead:
+    now = now or datetime.now(timezone.utc)
     count_result = await session.execute(
         select(func.count(Response.id)).where(Response.evaluation_id == ev.id)
     )
@@ -311,6 +323,7 @@ async def _build_evaluation_read(
         )
         for q in sorted(ev.questions, key=lambda q: q.order)
     ]
+    lc_extra = lifecycle_enrichment(ev, now)
     return EvaluationRead(
         id=ev.id,
         title=ev.title,
@@ -318,8 +331,14 @@ async def _build_evaluation_read(
         description=ev.description,
         duration=ev.duration,
         status=ev.status,
+        start_at=ev.scheduled_starts_at,
+        end_at=ev.scheduled_ends_at,
         scheduled_starts_at=ev.scheduled_starts_at,
         scheduled_ends_at=ev.scheduled_ends_at,
+        lifecycle_status=lc_extra["lifecycle_status"],
+        server_now=lc_extra["server_now"],
+        seconds_until_start=lc_extra["seconds_until_start"],
+        seconds_until_end=lc_extra["seconds_until_end"],
         question_count=len(q_reads),
         response_count=response_count,
         author_id=ev.author_id,
@@ -466,12 +485,17 @@ async def start_public_evaluation_session(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Sesiune invalidă sau expirată. Reîncarcă pagina pentru o sesiune nouă.",
             )
-        sec = _public_seconds_remaining(att.started_at, duration_minutes)
+        if should_reset_attempt_start(att.started_at, ev.scheduled_starts_at, now):
+            att.started_at = now
+            await session.commit()
+            await session.refresh(att)
+        sec = exam_seconds_remaining(att.started_at, duration_minutes, now, ev.scheduled_ends_at)
         qs = _public_shuffled_question_reads(ev, att.session_token)
         return PublicStartRead(
             session_token=att.session_token,
             seconds_remaining=sec,
             duration_minutes=duration_minutes,
+            server_now=now,
             questions=qs,
         )
 
@@ -484,12 +508,13 @@ async def start_public_evaluation_session(
     session.add(att)
     await session.commit()
     await session.refresh(att)
-    sec = _public_seconds_remaining(att.started_at, duration_minutes)
+    sec = exam_seconds_remaining(att.started_at, duration_minutes, now, ev.scheduled_ends_at)
     qs = _public_shuffled_question_reads(ev, att.session_token)
     return PublicStartRead(
         session_token=new_token,
         seconds_remaining=sec,
         duration_minutes=duration_minutes,
+        server_now=now,
         questions=qs,
     )
 
@@ -515,6 +540,7 @@ async def get_public_evaluation(
     open_now = student_may_access_evaluation(ev, now)
     kind = schedule_block_kind(ev, now) if not open_now else None
     msg = schedule_blocks_access(ev, now) if not open_now else None
+    lc = lifecycle_enrichment(ev, now)
     # Întrebările nu sunt incluse aici — conținutul se dă doar la /start când fereastra e deschisă.
     return PublicEvaluationRead(
         id=ev.id,
@@ -523,8 +549,14 @@ async def get_public_evaluation(
         description=ev.description,
         duration=ev.duration,
         questions=[],
+        start_at=ev.scheduled_starts_at,
+        end_at=ev.scheduled_ends_at,
         scheduled_starts_at=ev.scheduled_starts_at,
         scheduled_ends_at=ev.scheduled_ends_at,
+        lifecycle_status=lc["lifecycle_status"],
+        server_now=lc["server_now"],
+        seconds_until_start=lc["seconds_until_start"],
+        seconds_until_end=lc["seconds_until_end"],
         question_count=nq,
         schedule_access_blocked=not open_now,
         schedule_block_kind=kind,
@@ -567,7 +599,7 @@ async def submit_public_answer(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Sesiune invalidă. Reîncarcă pagina și începe din nou.",
         )
-    if _public_seconds_remaining(attempt.started_at, duration_minutes) <= 0:
+    if exam_seconds_remaining(attempt.started_at, duration_minutes, now, ev.scheduled_ends_at) <= 0:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Timpul pentru această evaluare a expirat.",
@@ -657,18 +689,19 @@ async def list_evaluations(
     now_student_gate = datetime.now(timezone.utc)
     for ev in evaluations:
         if current_user.role == UserRole.STUDENT:
-            built = await _build_evaluation_read(session, ev, include_access_secrets=False)
+            built = await _build_evaluation_read(session, ev, include_access_secrets=False, now=now_student_gate)
             built = _apply_student_schedule_gate(built, ev, now_student_gate)
             if not built.schedule_access_blocked:
                 built = _shuffle_evaluation_questions_for_student(built, current_user.id)
             eval_list.append(built)
         else:
             await _ensure_access_code(session, ev)
-            eval_list.append(await _build_evaluation_read(session, ev, include_access_secrets=True))
+            eval_list.append(
+                await _build_evaluation_read(session, ev, include_access_secrets=True, now=now_student_gate)
+            )
 
     total = len(eval_list)
-    now_stats = datetime.now(timezone.utc)
-    active = sum(1 for ev in evaluations if student_may_access_evaluation(ev, now_stats))
+    active = sum(1 for ev in evaluations if student_may_access_evaluation(ev, now_student_gate))
 
     if current_user.role == UserRole.STUDENT:
         own_count_result = await session.execute(
@@ -777,6 +810,7 @@ async def list_my_responses(
 class AttemptRead(BaseModel):
     started_at: datetime
     seconds_remaining: int
+    server_now: datetime
 
     class Config:
         from_attributes = True
@@ -823,12 +857,19 @@ async def start_evaluation(
         await session.refresh(attempt)
 
     now = datetime.now(timezone.utc)
-    started = attempt.started_at.replace(tzinfo=timezone.utc) if attempt.started_at.tzinfo is None else attempt.started_at
-    elapsed = (now - started).total_seconds()
-    total = evaluation.duration * 60
-    remaining = max(0, int(total - elapsed))
+    if should_reset_attempt_start(attempt.started_at, evaluation.scheduled_starts_at, now):
+        attempt.started_at = now
+        await session.commit()
+        await session.refresh(attempt)
 
-    return AttemptRead(started_at=started, seconds_remaining=remaining)
+    started = (
+        attempt.started_at.replace(tzinfo=timezone.utc)
+        if attempt.started_at.tzinfo is None
+        else attempt.started_at
+    )
+    remaining = exam_seconds_remaining(started, evaluation.duration, now, evaluation.scheduled_ends_at)
+
+    return AttemptRead(started_at=started, seconds_remaining=remaining, server_now=now)
 
 
 # Sub-routes with extra path segments MUST be registered before GET /{evaluation_id}
@@ -1118,12 +1159,16 @@ async def create_evaluation(
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> EvaluationRead:
+    start_val = data.start_at if data.start_at is not None else data.scheduled_starts_at
+    end_val = data.end_at if data.end_at is not None else data.scheduled_ends_at
     evaluation = Evaluation(
         title=data.title,
         subject=data.subject,
         description=data.description,
         duration=data.duration,
         status=data.status,
+        scheduled_starts_at=start_val,
+        scheduled_ends_at=end_val,
         author_id=current_user.id,
     )
     session.add(evaluation)
@@ -1213,8 +1258,10 @@ async def update_evaluation(
     evaluation.description = data.description
     evaluation.duration = data.duration
     evaluation.status = data.status
-    evaluation.scheduled_starts_at = data.scheduled_starts_at
-    evaluation.scheduled_ends_at = data.scheduled_ends_at
+    evaluation.scheduled_starts_at = (
+        data.start_at if data.start_at is not None else data.scheduled_starts_at
+    )
+    evaluation.scheduled_ends_at = data.end_at if data.end_at is not None else data.scheduled_ends_at
 
     if data.questions is not None:
         await _sync_questions(session, evaluation, data.questions)

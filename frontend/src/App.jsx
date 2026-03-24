@@ -48,15 +48,38 @@ function formatCountdownToStart(iso) {
   return `${sec} s`
 }
 
+/** Countdown din secunde (ex. răspuns server `seconds_until_start`). */
+function formatSecondsCountdown(totalSec) {
+  if (totalSec == null || totalSec < 0) return '—'
+  const s = Math.floor(totalSec)
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (d > 0) return `${d} zile, ${h} h`
+  if (h > 0) return `${h} h ${m} min`
+  if (m > 0) return `${m} min ${sec} s`
+  return `${sec} s`
+}
+
 function studentCardScheduleLine(a) {
-  if (!a?.schedule_access_blocked) return null
-  if (a.schedule_block_kind === 'before_start' && a.scheduled_starts_at) {
-    return `Începe la ${new Date(a.scheduled_starts_at).toLocaleString('ro-RO', { dateStyle: 'short', timeStyle: 'short' })}`
+  const st = a.start_at || a.scheduled_starts_at
+  if (a.lifecycle_status === 'scheduled' && st) {
+    return `Programată — începe la ${new Date(st).toLocaleString('ro-RO', { dateStyle: 'short', timeStyle: 'short' })}`
   }
-  if (a.schedule_block_kind === 'after_end') {
-    return 'Perioada de acces s-a încheiat'
+  if (a.lifecycle_status === 'closed') {
+    return 'Închisă (fereastră sau manual)'
   }
-  return a.schedule_block_message || null
+  if (a.schedule_access_blocked) {
+    if (a.schedule_block_kind === 'before_start' && st) {
+      return `Începe la ${new Date(st).toLocaleString('ro-RO', { dateStyle: 'short', timeStyle: 'short' })}`
+    }
+    if (a.schedule_block_kind === 'after_end') {
+      return 'Perioada de acces s-a încheiat'
+    }
+    return a.schedule_block_message || null
+  }
+  return null
 }
 
 function formatEvaluationScheduleLabel({ status, scheduled_starts_at, scheduled_ends_at }) {
@@ -356,6 +379,8 @@ function App() {
   const [timerExpired, setTimerExpired] = useState(false)
   /** Re-render pentru countdown „începe în X” pe pagina de detaliu */
   const [scheduleTick, setScheduleTick] = useState(0)
+  /** Countdown până la start_at, sincron cu server (seconds_until_start), decrement local */
+  const [gateSecondsLeft, setGateSecondsLeft] = useState(null)
   const timerRef = useRef(null)
   const autoSubmitRef = useRef(false)
 
@@ -422,10 +447,13 @@ function App() {
 
   // Auto-submit when timer expires
   useEffect(() => {
+    const examWin =
+      !selectedAssessment?.lifecycle_status || selectedAssessment.lifecycle_status === 'active'
     if (
       timerExpired &&
       autoSubmitRef.current &&
       selectedAssessment &&
+      examWin &&
       !selectedAssessment.schedule_access_blocked
     ) {
       autoSubmitRef.current = false
@@ -449,23 +477,47 @@ function App() {
   }, [timerExpired])
 
   useEffect(() => {
-    if (
-      view !== 'detail' ||
-      !selectedAssessment?.schedule_access_blocked ||
-      selectedAssessment.schedule_block_kind !== 'before_start'
-    ) {
+    if (selectedAssessment?.seconds_until_start != null) {
+      setGateSecondsLeft(selectedAssessment.seconds_until_start)
+    } else {
+      setGateSecondsLeft(null)
+    }
+  }, [selectedAssessment?.id, selectedAssessment?.seconds_until_start])
+
+  useEffect(() => {
+    const isScheduled =
+      selectedAssessment?.lifecycle_status === 'scheduled' ||
+      (selectedAssessment?.schedule_access_blocked && selectedAssessment?.schedule_block_kind === 'before_start')
+    if (view !== 'detail' || !isScheduled) {
       return
     }
     const id = setInterval(() => setScheduleTick((x) => x + 1), 1000)
     return () => clearInterval(id)
-  }, [view, selectedAssessment?.id, selectedAssessment?.schedule_access_blocked, selectedAssessment?.schedule_block_kind])
+  }, [view, selectedAssessment?.id, selectedAssessment?.lifecycle_status, selectedAssessment?.schedule_access_blocked, selectedAssessment?.schedule_block_kind])
+
+  useEffect(() => {
+    const isScheduled =
+      selectedAssessment?.lifecycle_status === 'scheduled' ||
+      (selectedAssessment?.schedule_access_blocked && selectedAssessment?.schedule_block_kind === 'before_start')
+    if (view !== 'detail' || !isScheduled) return
+    const id = setInterval(() => {
+      setGateSecondsLeft((s) => (s != null && s > 0 ? s - 1 : s))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [
+    view,
+    selectedAssessment?.id,
+    selectedAssessment?.lifecycle_status,
+    selectedAssessment?.schedule_access_blocked,
+    selectedAssessment?.schedule_block_kind,
+  ])
 
   useEffect(() => {
     if (view !== 'detail' || user?.role === 'professor' || !token || !selectedAssessment) return
-    if (
-      !selectedAssessment.schedule_access_blocked ||
-      selectedAssessment.schedule_block_kind !== 'before_start'
-    ) {
+    const isScheduled =
+      selectedAssessment.lifecycle_status === 'scheduled' ||
+      (selectedAssessment.schedule_access_blocked && selectedAssessment.schedule_block_kind === 'before_start')
+    if (!isScheduled) {
       return
     }
     const evalId = selectedAssessment.id
@@ -833,11 +885,12 @@ function App() {
         ? `${API_URL}${API_PREFIX}/evaluations/${editingAssessment.id}`
         : `${API_URL}${API_PREFIX}/evaluations/`
       
+      const { questions: qList, scheduled_starts_at: _ss, scheduled_ends_at: _se, ...formRest } = assessmentForm
       const payload = {
-        ...assessmentForm,
-        scheduled_starts_at: localDatetimeInputToIso(assessmentForm.scheduled_starts_at),
-        scheduled_ends_at: localDatetimeInputToIso(assessmentForm.scheduled_ends_at),
-        questions: assessmentForm.questions.map(({ _key, ...rest }, idx) => ({
+        ...formRest,
+        start_at: localDatetimeInputToIso(assessmentForm.scheduled_starts_at),
+        end_at: localDatetimeInputToIso(assessmentForm.scheduled_ends_at),
+        questions: qList.map(({ _key, ...rest }, idx) => ({
           ...rest,
           order: idx,
         })),
@@ -875,8 +928,8 @@ function App() {
       description: assessment.description || '',
       duration: assessment.duration,
       status: assessment.status,
-      scheduled_starts_at: isoToDatetimeLocalValue(assessment.scheduled_starts_at),
-      scheduled_ends_at: isoToDatetimeLocalValue(assessment.scheduled_ends_at),
+      scheduled_starts_at: isoToDatetimeLocalValue(assessment.start_at || assessment.scheduled_starts_at),
+      scheduled_ends_at: isoToDatetimeLocalValue(assessment.end_at || assessment.scheduled_ends_at),
       questions: (assessment.questions || []).map((q) => ({
         ...q,
         _key: q.id || Date.now() + Math.random(),
@@ -1575,8 +1628,27 @@ function App() {
   // Assessment Detail view
   if (view === 'detail' && selectedAssessment) {
     const isOwner = user?.role === 'professor' && selectedAssessment.author_id === user?.id
-    const scheduleBlocked = Boolean(!isOwner && selectedAssessment.schedule_access_blocked)
+    const scheduleBlocked = Boolean(
+      !isOwner &&
+        (selectedAssessment.lifecycle_status
+          ? selectedAssessment.lifecycle_status !== 'active'
+          : selectedAssessment.schedule_access_blocked)
+    )
     const canAnswer = !isOwner && !scheduleBlocked
+    const startIso = selectedAssessment.start_at || selectedAssessment.scheduled_starts_at
+    const endIso = selectedAssessment.end_at || selectedAssessment.scheduled_ends_at
+    const showScheduledGate =
+      scheduleBlocked &&
+      (selectedAssessment.lifecycle_status === 'scheduled' ||
+        (!selectedAssessment.lifecycle_status && selectedAssessment.schedule_block_kind === 'before_start'))
+    const showClosedGate =
+      scheduleBlocked &&
+      (selectedAssessment.lifecycle_status === 'closed' ||
+        (!selectedAssessment.lifecycle_status && selectedAssessment.schedule_block_kind === 'after_end'))
+    const examWindowActive =
+      !selectedAssessment.lifecycle_status || selectedAssessment.lifecycle_status === 'active'
+    const gateCountdownLabel =
+      gateSecondsLeft != null ? formatSecondsCountdown(gateSecondsLeft) : formatCountdownToStart(startIso)
     const totalQuestions = getEvaluationQuestionCount(selectedAssessment)
     const submittedQuestionsCount = Object.keys(feedbackResults).length
     const allQuestionsSubmitted = totalQuestions > 0 && submittedQuestionsCount >= totalQuestions
@@ -1627,6 +1699,11 @@ function App() {
               <span className={`status-badge ${selectedAssessment.status}`}>
                 {selectedAssessment.status}
               </span>
+              {!isOwner && selectedAssessment.lifecycle_status && (
+                <span className={`status-badge lifecycle-${selectedAssessment.lifecycle_status}`}>
+                  {selectedAssessment.lifecycle_status}
+                </span>
+              )}
               {isOwner && (
                 <>
                   <button className="btn-secondary" onClick={() => handleEditAssessment(selectedAssessment)}>
@@ -1662,19 +1739,25 @@ function App() {
                   <h3>Descriere</h3>
                   <p>{selectedAssessment.description || 'Nicio descriere disponibilă.'}</p>
                 </ParticleCard>
-                {scheduleBlocked && selectedAssessment.schedule_block_kind === 'before_start' && (
+                {showScheduledGate && (
                   <ParticleCard className="info-card magic-bento-card magic-bento-card--border-glow schedule-countdown-card" disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
-                    <h3>Începe în curând</h3>
+                    <h3>Programată — începe în curând</h3>
                     <p className="schedule-countdown-large" key={scheduleTick}>
-                      {formatCountdownToStart(selectedAssessment.scheduled_starts_at)}
+                      {gateCountdownLabel}
                     </p>
+                    {selectedAssessment.server_now && (
+                      <p className="text-muted schedule-server-now">
+                        Timp server: {new Date(selectedAssessment.server_now).toLocaleString('ro-RO')}
+                      </p>
+                    )}
                     <p className="text-muted schedule-countdown-sub">
-                      La ora programată vei putea vedea întrebările și vei avea {selectedAssessment.duration} minute pentru completare.
-                      Pagina se reîncarcă singură la deschiderea ferestrei.
+                      După deschiderea ferestrei vei putea vedea întrebările. Ai maxim {selectedAssessment.duration}{' '}
+                      minute pentru completare după ce începi (și nu poți depăși închiderea ferestrei).
+                      Pagina se actualizează singură la deschidere.
                     </p>
                   </ParticleCard>
                 )}
-                {scheduleBlocked && selectedAssessment.schedule_block_kind === 'after_end' && (
+                {showClosedGate && (
                   <ParticleCard className="info-card magic-bento-card magic-bento-card--border-glow schedule-ended-sidebar-card" disableAnimations={isMobile} particleCount={6} glowColor="132, 0, 255" enableTilt={false} clickEffect>
                     <h3>Fereastra s-a încheiat</h3>
                     <p className="text-muted">{selectedAssessment.schedule_block_message}</p>
@@ -1699,27 +1782,34 @@ function App() {
                     <span><Icons.People /> Răspunsuri:</span>
                     <strong>{selectedAssessment.response_count}</strong>
                   </div>
-                  {((selectedAssessment.scheduled_starts_at || selectedAssessment.scheduled_ends_at) ||
-                    (!isOwner && selectedAssessment.schedule_access_blocked)) && (
+                  {((startIso || endIso) || (!isOwner && scheduleBlocked)) && (
                     <div className="info-row info-row--block">
-                      <span>Programare acces (închidere/deschidere):</span>
+                      <span>Fereastră acces (start_at → end_at):</span>
                       <strong className="schedule-detail">
-                        {selectedAssessment.scheduled_starts_at
-                          ? new Date(selectedAssessment.scheduled_starts_at).toLocaleString('ro-RO', {
+                        {startIso
+                          ? new Date(startIso).toLocaleString('ro-RO', {
                               dateStyle: 'short',
                               timeStyle: 'short',
                             })
                           : '—'}
                         {' → '}
-                        {selectedAssessment.scheduled_ends_at
-                          ? new Date(selectedAssessment.scheduled_ends_at).toLocaleString('ro-RO', {
+                        {endIso
+                          ? new Date(endIso).toLocaleString('ro-RO', {
                               dateStyle: 'short',
                               timeStyle: 'short',
                             })
                           : '—'}
                       </strong>
-                      {!isOwner && selectedAssessment.schedule_access_blocked && selectedAssessment.schedule_block_message && (
+                      {!isOwner && scheduleBlocked && selectedAssessment.schedule_block_message && (
                         <p className="text-muted schedule-row-hint">{selectedAssessment.schedule_block_message}</p>
+                      )}
+                      {selectedAssessment.lifecycle_status && (
+                        <p className="text-muted schedule-row-hint">
+                          Ciclu viață (server, UTC): <strong>{selectedAssessment.lifecycle_status}</strong>
+                          {selectedAssessment.seconds_until_end != null && selectedAssessment.lifecycle_status === 'active'
+                            ? ` · până la end_at: ${formatSecondsCountdown(selectedAssessment.seconds_until_end)}`
+                            : ''}
+                        </p>
                       )}
                     </div>
                   )}
@@ -1782,16 +1872,16 @@ function App() {
                   <div className="info-card">
                     <p className="text-muted">Această evaluare nu conține exerciții.</p>
                   </div>
-                ) : scheduleBlocked && selectedAssessment.schedule_block_kind === 'before_start' ? (
+                ) : showScheduledGate ? (
                   <div className="info-card schedule-main-wait">
-                    <h2>Evaluarea nu a început încă</h2>
+                    <h2>Evaluarea este programată — nu a început încă</h2>
                     <p className="schedule-main-countdown" aria-live="polite" key={scheduleTick}>
-                      Rămâne: <strong>{formatCountdownToStart(selectedAssessment.scheduled_starts_at)}</strong>
+                      Rămâne până la deschiderea ferestrei: <strong>{gateCountdownLabel}</strong>
                     </p>
                     <p className="text-muted">
-                      Start oficial:{' '}
-                      {selectedAssessment.scheduled_starts_at
-                        ? new Date(selectedAssessment.scheduled_starts_at).toLocaleString('ro-RO', {
+                      Start fereastră (server):{' '}
+                      {startIso
+                        ? new Date(startIso).toLocaleString('ro-RO', {
                             dateStyle: 'full',
                             timeStyle: 'short',
                           })
@@ -1802,9 +1892,9 @@ function App() {
                       (nu este nevoie să reîncarci manual pagina).
                     </p>
                   </div>
-                ) : scheduleBlocked && selectedAssessment.schedule_block_kind === 'after_end' ? (
+                ) : showClosedGate ? (
                   <div className="info-card schedule-main-ended">
-                    <h2>Perioada de evaluare s-a încheiat</h2>
+                    <h2>Fereastra evaluării s-a încheiat</h2>
                     <p className="text-muted">{selectedAssessment.schedule_block_message}</p>
                     <p className="text-muted">Nu mai poți trimite răspunsuri noi pentru această sesiune.</p>
                   </div>
@@ -1819,9 +1909,10 @@ function App() {
                         Ai trimis deja toate răspunsurile. Mai jos poți vedea răspunsurile tale și orice reevaluare făcută de profesor.
                       </div>
                     )}
-                    {timerExpired && Object.keys(feedbackResults).length === 0 && (
+                    {timerExpired && examWindowActive && Object.keys(feedbackResults).length === 0 && (
                       <div className="timer-expired-banner">
-                        Timpul alocat pentru această evaluare ({selectedAssessment.duration} minute) a expirat. Nu mai poți modifica sau trimite răspunsuri.
+                        Timpul pentru completare ({selectedAssessment.duration} minute de la începutul încercării, în limita
+                        ferestrei) a expirat. Nu mai poți modifica sau trimite răspunsuri.
                       </div>
                     )}
                     {selectedAssessment.questions.map((q, idx) => {
@@ -2548,8 +2639,10 @@ function App() {
               </label>
             </div>
             <p className="text-muted form-hint-schedule">
-              Programare acces (opțional, ora locală): cu status <strong>Activ</strong>, studenții pot începe evaluarea
-              doar între aceste momente. Lasă gol pentru acces oricând cât timp evaluarea e activă.
+              <strong>Fereastră acces</strong> (ora locală): <code>start_at</code> → <code>end_at</code>. Pe server starea
+              devine <em>scheduled</em> / <em>active</em> / <em>closed</em> după timpul curent (UTC), fără scheduler.
+              <strong> Durată (minute)</strong> = timpul maxim de completare după ce studentul începe, în interiorul
+              ferestrei (nu pornește la crearea evaluării). Lasă fereastra goală pentru acces oricât timp statusul e Activ.
             </p>
             <div className="form-row">
               <label>
@@ -2861,7 +2954,14 @@ function App() {
                       <span className="subject">{assessment.subject || 'General'}</span>
                     </div>
                     {isProfessor && (
-                      <span className={`status-badge ${assessment.status}`}>{assessment.status}</span>
+                      <>
+                        <span className={`status-badge ${assessment.status}`}>{assessment.status}</span>
+                        {assessment.lifecycle_status && (
+                          <span className={`status-badge lifecycle-${assessment.lifecycle_status}`}>
+                            {assessment.lifecycle_status}
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
                   {scheduleHint && (

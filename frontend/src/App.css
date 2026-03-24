@@ -634,6 +634,28 @@ html[data-theme="light"] {
   color: var(--danger);
 }
 
+.status-badge.lifecycle-scheduled {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.45);
+}
+
+.status-badge.lifecycle-active {
+  background: var(--success-light);
+  color: var(--success);
+}
+
+.status-badge.lifecycle-closed {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.status-badge.lifecycle-draft {
+  background: var(--bg);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
 .card-description {
   margin: 0 0 1rem;
   font-size: 0.9375rem;

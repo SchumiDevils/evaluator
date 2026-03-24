@@ -22,6 +22,19 @@ function formatCountdownToStart(iso) {
   return `${sec} s`
 }
 
+function formatSecondsCountdown(totalSec) {
+  if (totalSec == null || totalSec < 0) return '—'
+  const s = Math.floor(totalSec)
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (d > 0) return `${d} zile, ${h} h`
+  if (h > 0) return `${h} h ${m} min`
+  if (m > 0) return `${m} min ${sec} s`
+  return `${sec} s`
+}
+
 const Icons = {
   Send: () => (
     <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
@@ -48,6 +61,7 @@ export default function PublicExam({ linkId, apiUrl }) {
   const [sessionReady, setSessionReady] = useState(false)
   const [startError, setStartError] = useState('')
   const [scheduleTick, setScheduleTick] = useState(0)
+  const [gateSecondsLeft, setGateSecondsLeft] = useState(null)
   /** Întrebări în ordine amestecată per sesiune (de la POST /start, nu din GET public). */
   const [sessionQuestions, setSessionQuestions] = useState(null)
 
@@ -66,13 +80,18 @@ export default function PublicExam({ linkId, apiUrl }) {
       const data = await res.json()
       setLoadError('')
       try {
-        if (data.schedule_access_blocked === true && data.schedule_block_kind === 'before_start') {
+        if (data.lifecycle_status === 'scheduled' || (data.schedule_access_blocked === true && data.schedule_block_kind === 'before_start')) {
           sessionStorage.removeItem(sessionKey(linkId))
         }
       } catch {
         /* ignore */
       }
       setEvalData(data)
+      if (data.seconds_until_start != null) {
+        setGateSecondsLeft(data.seconds_until_start)
+      } else {
+        setGateSecondsLeft(null)
+      }
     } catch {
       setLoadError('Nu s-a putut încărca evaluarea.')
     }
@@ -133,11 +152,11 @@ export default function PublicExam({ linkId, apiUrl }) {
         } catch {
           setFeedbackResults({})
         }
-        const total = Math.max(60, (data.duration_minutes || 30) * 60)
-        setTotalSeconds(total)
-        const sec = Math.min(data.seconds_remaining ?? 0, total)
-        setTimeRemaining(sec)
-        setTimerExpired(sec <= 0)
+        const rem = Math.max(0, data.seconds_remaining ?? 0)
+        const durCap = Math.max(60, (data.duration_minutes || 30) * 60)
+        setTotalSeconds(rem > 0 ? rem : durCap)
+        setTimeRemaining(rem)
+        setTimerExpired(rem <= 0)
         setSessionReady(true)
         return
       }
@@ -146,24 +165,38 @@ export default function PublicExam({ linkId, apiUrl }) {
     }
   }, [apiUrl, linkId])
 
-  const scheduleBlocked = evalData?.schedule_access_blocked === true
+  const publicScheduleBlocked =
+    evalData &&
+    (evalData.lifecycle_status ? evalData.lifecycle_status !== 'active' : evalData.schedule_access_blocked === true)
 
   useEffect(() => {
-    if (!evalData || scheduleBlocked) return
+    if (!evalData || publicScheduleBlocked) return
     startSession()
-  }, [evalData, scheduleBlocked, startSession])
+  }, [evalData, publicScheduleBlocked, startSession])
+
+  const waitForStart =
+    evalData?.lifecycle_status === 'scheduled' ||
+    (evalData?.schedule_access_blocked === true && evalData?.schedule_block_kind === 'before_start')
 
   useEffect(() => {
-    if (evalData?.schedule_access_blocked !== true || evalData.schedule_block_kind !== 'before_start') return
+    if (!waitForStart) return
     const id = setInterval(() => setScheduleTick((x) => x + 1), 1000)
     return () => clearInterval(id)
-  }, [evalData?.schedule_access_blocked, evalData?.schedule_block_kind])
+  }, [waitForStart])
 
   useEffect(() => {
-    if (evalData?.schedule_access_blocked !== true || evalData.schedule_block_kind !== 'before_start') return
+    if (!waitForStart) return
+    const id = setInterval(() => {
+      setGateSecondsLeft((s) => (s != null && s > 0 ? s - 1 : s))
+    }, 1000)
+    return () => clearInterval(id)
+  }, [waitForStart])
+
+  useEffect(() => {
+    if (!waitForStart) return
     const id = setInterval(load, 5000)
     return () => clearInterval(id)
-  }, [evalData?.schedule_access_blocked, evalData?.schedule_block_kind, load])
+  }, [waitForStart, load])
 
   useEffect(() => {
     if (!sessionReady || timerExpired) return
@@ -267,7 +300,11 @@ export default function PublicExam({ linkId, apiUrl }) {
     )
   }
 
-  if (evalData.schedule_access_blocked === true && evalData.schedule_block_kind === 'before_start') {
+  const startIsoPub = evalData.start_at || evalData.scheduled_starts_at
+  const gateLabelPub =
+    gateSecondsLeft != null ? formatSecondsCountdown(gateSecondsLeft) : formatCountdownToStart(startIsoPub)
+
+  if (waitForStart) {
     const nq = evalData.question_count ?? 0
     return (
       <div className="public-exam-page">
@@ -275,22 +312,27 @@ export default function PublicExam({ linkId, apiUrl }) {
           <h1>{evalData.title}</h1>
           {evalData.subject && <p className="public-exam-subject">{evalData.subject}</p>}
           {evalData.description && <p className="text-muted">{evalData.description}</p>}
-          <h2 className="public-schedule-wait-title">Evaluarea nu a început încă</h2>
+          <p className="text-muted">Stare (server): <strong>{evalData.lifecycle_status || 'scheduled'}</strong></p>
+          <h2 className="public-schedule-wait-title">Fereastra nu e deschisă — evaluarea e programată</h2>
           <p className="public-schedule-countdown" key={scheduleTick} aria-live="polite">
-            Rămâne până la deschidere: <strong>{formatCountdownToStart(evalData.scheduled_starts_at)}</strong>
+            Rămâne până la start_at: <strong>{gateLabelPub}</strong>
           </p>
+          {evalData.server_now && (
+            <p className="text-muted">Timp server: {new Date(evalData.server_now).toLocaleString('ro-RO')}</p>
+          )}
           <p className="text-muted">
-            Start programat:{' '}
-            {evalData.scheduled_starts_at
-              ? new Date(evalData.scheduled_starts_at).toLocaleString('ro-RO', {
+            Start fereastră:{' '}
+            {startIsoPub
+              ? new Date(startIsoPub).toLocaleString('ro-RO', {
                   dateStyle: 'full',
                   timeStyle: 'short',
                 })
               : '—'}
           </p>
           <p className="text-muted">
-            După început vei avea {evalData.duration} minute pentru completare.
-            {nq > 0 ? ` Evaluarea conține ${nq} exerciții.` : ''} Pagina se actualizează singură — nu este nevoie să o reîncarci manual.
+            În fereastra activă ai maxim {evalData.duration} minute pentru completare după ce începi (nu încep la
+            încărcarea paginii).
+            {nq > 0 ? ` ${nq} exerciții.` : ''} Pagina se actualizează singură.
           </p>
           <button type="button" className="btn-secondary" style={{ marginTop: '1rem' }} onClick={() => load()}>
             Reîmprospătează acum
@@ -300,12 +342,16 @@ export default function PublicExam({ linkId, apiUrl }) {
     )
   }
 
-  if (evalData.schedule_access_blocked === true && evalData.schedule_block_kind === 'after_end') {
+  const showClosedPublic =
+    evalData.lifecycle_status === 'closed' ||
+    (evalData.schedule_access_blocked === true && evalData.schedule_block_kind === 'after_end')
+
+  if (showClosedPublic) {
     return (
       <div className="public-exam-page">
         <div className="public-exam-card public-exam-schedule-ended">
           <h1>{evalData.title}</h1>
-          <h2>Perioada de acces s-a încheiat</h2>
+          <h2>Fereastra s-a încheiat</h2>
           <p className="text-muted">{evalData.schedule_block_message}</p>
           <p className="text-muted">Nu mai poți începe sau continua această evaluare prin acest link.</p>
         </div>
@@ -313,7 +359,7 @@ export default function PublicExam({ linkId, apiUrl }) {
     )
   }
 
-  if (evalData.schedule_access_blocked === true) {
+  if (publicScheduleBlocked) {
     return (
       <div className="public-exam-page">
         <div className="public-exam-card">
@@ -362,18 +408,18 @@ export default function PublicExam({ linkId, apiUrl }) {
             <h1>{evalData.title}</h1>
             {evalData.subject && <p className="public-exam-subject">{evalData.subject}</p>}
             {evalData.description && <p className="text-muted">{evalData.description}</p>}
-            {(evalData.scheduled_starts_at || evalData.scheduled_ends_at) && (
+            {(evalData.start_at || evalData.end_at || evalData.scheduled_starts_at || evalData.scheduled_ends_at) && (
               <p className="text-muted public-exam-timer-hint">
-                Fereastră acces:{' '}
-                {evalData.scheduled_starts_at
-                  ? new Date(evalData.scheduled_starts_at).toLocaleString('ro-RO', {
+                Fereastră acces (start → end):{' '}
+                {(evalData.start_at || evalData.scheduled_starts_at)
+                  ? new Date(evalData.start_at || evalData.scheduled_starts_at).toLocaleString('ro-RO', {
                       dateStyle: 'short',
                       timeStyle: 'short',
                     })
                   : '—'}
                 {' → '}
-                {evalData.scheduled_ends_at
-                  ? new Date(evalData.scheduled_ends_at).toLocaleString('ro-RO', {
+                {(evalData.end_at || evalData.scheduled_ends_at)
+                  ? new Date(evalData.end_at || evalData.scheduled_ends_at).toLocaleString('ro-RO', {
                       dateStyle: 'short',
                       timeStyle: 'short',
                     })
@@ -381,7 +427,8 @@ export default function PublicExam({ linkId, apiUrl }) {
               </p>
             )}
             <p className="text-muted public-exam-timer-hint">
-              Timp limită pentru completare: {evalData.duration} minute (blochează trimiterea la expirare).
+              După început: maxim {evalData.duration} minute pentru completare (și nu după end_at). Stare:{' '}
+              <strong>{evalData.lifecycle_status || 'active'}</strong>.
             </p>
           </div>
           <div className="public-exam-timer-wrap">
@@ -394,10 +441,10 @@ export default function PublicExam({ linkId, apiUrl }) {
         </div>
       </div>
 
-      {timerBlock && (
+      {timerBlock && (evalData.lifecycle_status === 'active' || !evalData.lifecycle_status) && (
         <div className="notification error public-exam-notice">
-          Timpul alocat pentru completarea evaluării ({evalData.duration} minute) a expirat. Nu mai poți trimite
-          răspunsuri noi.
+          Timpul pentru completare în această sesiune a expirat (durată examen și/sau închiderea ferestrei). Nu mai
+          poți trimite răspunsuri noi.
         </div>
       )}
 
