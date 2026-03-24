@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def send_password_reset_email(to_addr: str, reset_url: str, settings: Settings) -> None:
-    """Trimite email cu link de resetare. Fără SMTP configurat, loghează linkul (dev)."""
+    """SMTP direct (legacy). Resetarea parolei folosește `email_resend` când e setat RESEND_API_KEY."""
     if not (settings.smtp_host or "").strip():
         logger.warning(
             "SMTP neconfigurat — link resetare parolă pentru %s: %s",

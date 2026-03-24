@@ -23,7 +23,7 @@ from ..schemas.auth import (
     Token,
 )
 from ..schemas.user import UserCreate, UserProfileUpdate, UserRead, user_to_read
-from ..services.email_smtp import send_password_reset_email
+from ..services.email_resend import send_password_reset_email
 
 logger = logging.getLogger(__name__)
 

@@ -48,7 +48,11 @@ class Settings(BaseSettings):
     frontend_base_url: str = "http://localhost:5173"
     password_reset_token_expire_minutes: int = 60
 
-    # SMTP opțional; dacă lipsește smtp_host, linkul se loghează (doar pentru dev).
+    # Resend (HTTPS) — recomandat pe Render etc.; setează RESEND_API_KEY în .env.
+    resend_api_key: Optional[str] = None
+    email_from: str = "Rubrix <onboarding@resend.dev>"
+
+    # SMTP opțional (legacy; nu e folosit pentru resetare parolă — vezi Resend mai sus).
     smtp_host: Optional[str] = None
     smtp_port: int = 587
     smtp_user: Optional[str] = None
