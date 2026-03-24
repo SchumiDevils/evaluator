@@ -1825,7 +1825,7 @@ function App() {
                   </div>
                   {((startIso || endIso) || (!isOwner && scheduleBlocked)) && (
                     <div className="info-row info-row--block">
-                      <span>Fereastră acces (start_at → end_at):</span>
+                      <span>Perioadă acces (început → sfârșit):</span>
                       <strong className="schedule-detail">
                         {startIso
                           ? new Date(startIso).toLocaleString('ro-RO', {
@@ -2680,10 +2680,12 @@ function App() {
               </label>
             </div>
             <p className="text-muted form-hint-schedule">
-              <strong>Fereastră acces</strong> (ora locală): <code>start_at</code> → <code>end_at</code>. Pe server starea
-              devine <em>scheduled</em> / <em>active</em> / <em>closed</em> după timpul curent (UTC), fără scheduler.
-              <strong> Durată (minute)</strong> = timpul maxim de completare după ce studentul începe, în interiorul
-              ferestrei (nu pornește la crearea evaluării). Lasă fereastra goală pentru acces oricât timp statusul e Activ.
+              <strong>Început acces</strong> și <strong>Sfârșit acces</strong> sunt opționale și folosesc ora de pe
+              dispozitivul tău. Dacă le completezi, elevii pot porni testul doar între aceste momente; în afara
+              intervalului nu mai pot intra. <strong>Durată (minute)</strong> înseamnă cât timp maxim are fiecare elev{' '}
+              <em>după ce a început</em> testul — nu de la momentul în care salvezi evaluarea — și nu poate depăși
+              timpul rămas până la sfârșitul ferestrei. <strong>Dacă lași ambele câmpuri goale</strong>, nu există
+              restricție de oră: atâta timp cât statusul este <strong>Activ</strong>, elevii pot intra când vor.
             </p>
             <div className="form-row">
               <label>
