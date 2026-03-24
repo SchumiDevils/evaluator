@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import case, cast, func, select, Float
+from sqlalchemy import case, cast, func, or_, select, Float
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.session import get_session
@@ -60,9 +61,12 @@ async def get_analytics(
         subq = select(EvaluationEnrollment.evaluation_id).where(
             EvaluationEnrollment.user_id == current_user.id
         )
+        now = datetime.now(timezone.utc)
         eval_ids_q = select(Evaluation.id).where(
             Evaluation.status == "active",
             Evaluation.id.in_(subq),
+            or_(Evaluation.scheduled_starts_at.is_(None), Evaluation.scheduled_starts_at <= now),
+            or_(Evaluation.scheduled_ends_at.is_(None), Evaluation.scheduled_ends_at >= now),
         )
     else:
         eval_ids_q = (

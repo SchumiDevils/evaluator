@@ -39,7 +39,12 @@ export default function PublicExam({ linkId, apiUrl }) {
     try {
       const res = await fetch(`${apiUrl}${API_PREFIX}/evaluations/public/${linkId}`)
       if (!res.ok) {
-        setLoadError('Link invalid sau evaluarea nu este activă.')
+        const err = await res.json().catch(() => ({}))
+        setLoadError(
+          typeof err.detail === 'string'
+            ? err.detail
+            : 'Link invalid sau evaluarea nu este activă.'
+        )
         return
       }
       setEvalData(await res.json())

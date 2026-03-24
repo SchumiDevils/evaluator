@@ -18,6 +18,10 @@ def _sync_migrate(sync_conn: Any) -> None:
             sync_conn.execute(text("ALTER TABLE evaluations ADD COLUMN access_code VARCHAR(20)"))
         if "public_link_id" not in ev_cols:
             sync_conn.execute(text("ALTER TABLE evaluations ADD COLUMN public_link_id VARCHAR(36)"))
+        if "scheduled_starts_at" not in ev_cols:
+            sync_conn.execute(text("ALTER TABLE evaluations ADD COLUMN scheduled_starts_at TIMESTAMP"))
+        if "scheduled_ends_at" not in ev_cols:
+            sync_conn.execute(text("ALTER TABLE evaluations ADD COLUMN scheduled_ends_at TIMESTAMP"))
     if insp.has_table("responses"):
         resp_cols = {c["name"] for c in insp.get_columns("responses")}
         if "guest_name" not in resp_cols:

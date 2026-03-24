@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin
@@ -20,6 +21,8 @@ class Evaluation(TimestampMixin, Base):
     author_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     access_code: Mapped[Optional[str]] = mapped_column(String(20), unique=True, index=True, nullable=True)
     public_link_id: Mapped[Optional[str]] = mapped_column(String(36), unique=True, index=True, nullable=True)
+    scheduled_starts_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    scheduled_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     author: Mapped[Optional["User"]] = relationship(back_populates="evaluations")
     responses: Mapped[List["Response"]] = relationship(back_populates="evaluation", cascade="all, delete")

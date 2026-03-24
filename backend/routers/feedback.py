@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +10,7 @@ from ..db.session import get_session
 from ..models import Evaluation, EvaluationEnrollment, Question, User
 from ..models.user import UserRole
 from ..schemas.feedback import FeedbackResponse, ResponseCreate
+from ..services.evaluation_access import schedule_blocks_access, student_may_access_evaluation
 from ..services.feedback_service import generate_and_store_feedback
 from .auth import get_current_user
 
@@ -47,6 +50,12 @@ async def create_feedback(
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Nu ești înscris la această evaluare.",
+                )
+            if not student_may_access_evaluation(evaluation, datetime.now(timezone.utc)):
+                detail = schedule_blocks_access(evaluation, datetime.now(timezone.utc))
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=detail or "Evaluarea nu este disponibilă.",
                 )
 
     if payload.question_id:

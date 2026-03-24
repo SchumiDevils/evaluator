@@ -8,6 +8,45 @@ import rubrixLogo from './assets/rubrix-logo.svg'
 import PublicExam from './PublicExam.jsx'
 import './App.css'
 
+/** datetime-local (ora locală) → ISO UTC pentru API */
+function localDatetimeInputToIso(localStr) {
+  if (!localStr || !String(localStr).trim()) return null
+  const d = new Date(localStr)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString()
+}
+
+function isoToDatetimeLocalValue(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+/** Etichetă scurtă pentru carduri (profesor): starea ferestrei de programare */
+function formatEvaluationScheduleLabel({ status, scheduled_starts_at, scheduled_ends_at }) {
+  if (status !== 'active') return null
+  if (!scheduled_starts_at && !scheduled_ends_at) return null
+  const fmt = (iso) => {
+    const d = new Date(iso)
+    return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ro-RO', { dateStyle: 'short', timeStyle: 'short' })
+  }
+  const now = Date.now()
+  const startMs = scheduled_starts_at ? new Date(scheduled_starts_at).getTime() : null
+  const endMs = scheduled_ends_at ? new Date(scheduled_ends_at).getTime() : null
+  if (startMs != null && !Number.isNaN(startMs) && now < startMs) {
+    return `Începe ${fmt(scheduled_starts_at)}`
+  }
+  if (endMs != null && !Number.isNaN(endMs) && now > endMs) {
+    return 'Fereastra s-a încheiat'
+  }
+  const parts = []
+  if (scheduled_starts_at) parts.push(`de la ${fmt(scheduled_starts_at)}`)
+  if (scheduled_ends_at) parts.push(`până la ${fmt(scheduled_ends_at)}`)
+  return parts.length ? `Acces studenți: ${parts.join(' ')}` : null
+}
+
 function RubrixDrawTitle() {
   const svgRef = useRef(null)
 
@@ -236,6 +275,8 @@ function App() {
     description: '',
     duration: 30,
     status: 'draft',
+    scheduled_starts_at: '',
+    scheduled_ends_at: '',
     questions: []
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -649,7 +690,16 @@ function App() {
   })
 
   const resetAssessmentForm = () => {
-    setAssessmentForm({ title: '', subject: '', description: '', duration: 30, status: 'draft', questions: [] })
+    setAssessmentForm({
+      title: '',
+      subject: '',
+      description: '',
+      duration: 30,
+      status: 'draft',
+      scheduled_starts_at: '',
+      scheduled_ends_at: '',
+      questions: [],
+    })
     setEditingAssessment(null)
   }
 
@@ -670,6 +720,8 @@ function App() {
       
       const payload = {
         ...assessmentForm,
+        scheduled_starts_at: localDatetimeInputToIso(assessmentForm.scheduled_starts_at),
+        scheduled_ends_at: localDatetimeInputToIso(assessmentForm.scheduled_ends_at),
         questions: assessmentForm.questions.map(({ _key, ...rest }, idx) => ({
           ...rest,
           order: idx,
@@ -708,6 +760,8 @@ function App() {
       description: assessment.description || '',
       duration: assessment.duration,
       status: assessment.status,
+      scheduled_starts_at: isoToDatetimeLocalValue(assessment.scheduled_starts_at),
+      scheduled_ends_at: isoToDatetimeLocalValue(assessment.scheduled_ends_at),
       questions: (assessment.questions || []).map((q) => ({
         ...q,
         _key: q.id || Date.now() + Math.random(),
@@ -1491,6 +1545,26 @@ function App() {
                     <span><Icons.People /> Răspunsuri:</span>
                     <strong>{selectedAssessment.response_count}</strong>
                   </div>
+                  {(selectedAssessment.scheduled_starts_at || selectedAssessment.scheduled_ends_at) && (
+                    <div className="info-row info-row--block">
+                      <span>Programare acces:</span>
+                      <strong className="schedule-detail">
+                        {selectedAssessment.scheduled_starts_at
+                          ? new Date(selectedAssessment.scheduled_starts_at).toLocaleString('ro-RO', {
+                              dateStyle: 'short',
+                              timeStyle: 'short',
+                            })
+                          : '—'}
+                        {' → '}
+                        {selectedAssessment.scheduled_ends_at
+                          ? new Date(selectedAssessment.scheduled_ends_at).toLocaleString('ro-RO', {
+                              dateStyle: 'short',
+                              timeStyle: 'short',
+                            })
+                          : '—'}
+                      </strong>
+                    </div>
+                  )}
                   <div className="info-row">
                     <span><Icons.Document /> Exerciții:</span>
                     <strong>{(selectedAssessment.questions || []).length}</strong>
@@ -2285,6 +2359,28 @@ function App() {
                 </select>
               </label>
             </div>
+            <p className="text-muted form-hint-schedule">
+              Programare acces (opțional, ora locală): cu status <strong>Activ</strong>, studenții pot începe evaluarea
+              doar între aceste momente. Lasă gol pentru acces oricând cât timp evaluarea e activă.
+            </p>
+            <div className="form-row">
+              <label>
+                Început acces
+                <input
+                  type="datetime-local"
+                  value={assessmentForm.scheduled_starts_at}
+                  onChange={(e) => setAssessmentForm((p) => ({ ...p, scheduled_starts_at: e.target.value }))}
+                />
+              </label>
+              <label>
+                Sfârșit acces
+                <input
+                  type="datetime-local"
+                  value={assessmentForm.scheduled_ends_at}
+                  onChange={(e) => setAssessmentForm((p) => ({ ...p, scheduled_ends_at: e.target.value }))}
+                />
+              </label>
+            </div>
 
             <div className="questions-builder">
               <div className="questions-header">
@@ -2553,7 +2649,9 @@ function App() {
               )}
             </div>
           ) : (
-            filteredAssessments.map((assessment) => (
+            filteredAssessments.map((assessment) => {
+              const scheduleHint = isProfessor ? formatEvaluationScheduleLabel(assessment) : null
+              return (
               <ParticleCard
                 className="assessment-card magic-bento-card magic-bento-card--border-glow"
                 key={assessment.id}
@@ -2577,6 +2675,9 @@ function App() {
                       <span className={`status-badge ${assessment.status}`}>{assessment.status}</span>
                     )}
                   </div>
+                  {scheduleHint && (
+                    <p className="card-schedule-hint text-muted">{scheduleHint}</p>
+                  )}
                   <p className="card-description">
                     {assessment.description || 'Nicio descriere disponibilă'}
                   </p>
@@ -2615,7 +2716,8 @@ function App() {
                   </div>
                 </div>
               </ParticleCard>
-            ))
+              )
+            })
           )}
         </div>
       </main>

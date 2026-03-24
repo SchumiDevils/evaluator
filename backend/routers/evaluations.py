@@ -7,8 +7,8 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import Response as HttpPdfResponse
-from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -32,6 +32,7 @@ from ..schemas.feedback import (
     ProfessorFeedbackUpdate,
     ResponseRead,
 )
+from ..services.evaluation_access import schedule_blocks_access, student_may_access_evaluation
 from ..services.evaluation_pdf import build_evaluation_results_pdf
 from ..services.feedback_service import generate_and_store_feedback
 from .auth import get_current_user
@@ -66,7 +67,22 @@ class EvaluationCreate(BaseModel):
     description: Optional[str] = None
     duration: int = 30
     status: str = "draft"
+    scheduled_starts_at: Optional[datetime] = None
+    scheduled_ends_at: Optional[datetime] = None
     questions: Optional[List[QuestionSchema]] = None
+
+    @model_validator(mode="after")
+    def validate_schedule(self) -> "EvaluationCreate":
+        if self.scheduled_starts_at is not None and self.scheduled_ends_at is not None:
+            s = self.scheduled_starts_at
+            e = self.scheduled_ends_at
+            if s.tzinfo is None:
+                s = s.replace(tzinfo=timezone.utc)
+            if e.tzinfo is None:
+                e = e.replace(tzinfo=timezone.utc)
+            if e <= s:
+                raise ValueError("Data și ora de sfârșit trebuie să fie după început.")
+        return self
 
 
 class EvaluationRead(BaseModel):
@@ -76,6 +92,8 @@ class EvaluationRead(BaseModel):
     description: Optional[str]
     duration: int
     status: str
+    scheduled_starts_at: Optional[datetime] = None
+    scheduled_ends_at: Optional[datetime] = None
     response_count: int = 0
     questions: List[QuestionRead] = []
     author_id: Optional[int] = None
@@ -274,6 +292,8 @@ async def _build_evaluation_read(
         description=ev.description,
         duration=ev.duration,
         status=ev.status,
+        scheduled_starts_at=ev.scheduled_starts_at,
+        scheduled_ends_at=ev.scheduled_ends_at,
         response_count=response_count,
         author_id=ev.author_id,
         author_name=author_name,
@@ -381,6 +401,10 @@ async def start_public_evaluation_session(
     ev = result.scalar_one_or_none()
     if not ev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link invalid sau evaluare inactivă.")
+    now = datetime.now(timezone.utc)
+    denied = schedule_blocks_access(ev, now)
+    if denied:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=denied)
     duration_minutes = max(1, int(ev.duration or 1))
 
     token_in = (body.session_token or "").strip() or None
@@ -440,6 +464,10 @@ async def get_public_evaluation(
     ev = result.scalar_one_or_none()
     if not ev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link invalid sau evaluare inactivă.")
+    now = datetime.now(timezone.utc)
+    denied = schedule_blocks_access(ev, now)
+    if denied:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=denied)
     # Întrebările nu sunt incluse aici — ordinea și conținutul se dau doar la /start (per sesiune),
     # ca să nu poată fi citite înainte de începerea examenului.
     return PublicEvaluationRead(
@@ -469,6 +497,10 @@ async def submit_public_answer(
     ev = result.scalar_one_or_none()
     if not ev:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Link invalid.")
+    now = datetime.now(timezone.utc)
+    denied = schedule_blocks_access(ev, now)
+    if denied:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=denied)
     duration_minutes = max(1, int(ev.duration or 1))
     att_r = await session.execute(
         select(PublicEvaluationAttempt).where(
@@ -549,9 +581,15 @@ async def list_evaluations(
         subq = select(EvaluationEnrollment.evaluation_id).where(
             EvaluationEnrollment.user_id == current_user.id
         )
+        now = datetime.now(timezone.utc)
         query = (
             select(Evaluation)
-            .where(Evaluation.status == "active", Evaluation.id.in_(subq))
+            .where(
+                Evaluation.status == "active",
+                Evaluation.id.in_(subq),
+                or_(Evaluation.scheduled_starts_at.is_(None), Evaluation.scheduled_starts_at <= now),
+                or_(Evaluation.scheduled_ends_at.is_(None), Evaluation.scheduled_ends_at >= now),
+            )
             .options(selectinload(Evaluation.questions))
             .order_by(Evaluation.created_at.desc())
         )
@@ -576,7 +614,8 @@ async def list_evaluations(
             eval_list.append(await _build_evaluation_read(session, ev, include_access_secrets=True))
 
     total = len(eval_list)
-    active = sum(1 for e in eval_list if e.status == "active")
+    now_stats = datetime.now(timezone.utc)
+    active = sum(1 for ev in evaluations if student_may_access_evaluation(ev, now_stats))
 
     if current_user.role == UserRole.STUDENT:
         own_count_result = await session.execute(
@@ -709,6 +748,9 @@ async def start_evaluation(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Nu ești înscris la această evaluare. Folosește codul de acces.",
             )
+        denied = schedule_blocks_access(evaluation, datetime.now(timezone.utc))
+        if denied:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=denied)
 
     result = await session.execute(
         select(EvaluationAttempt).where(
@@ -1078,6 +1120,8 @@ async def get_evaluation(
     if not evaluation:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
     if current_user.role == UserRole.STUDENT:
+        if not student_may_access_evaluation(evaluation, datetime.now(timezone.utc)):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
         if not await _student_enrolled(session, current_user.id, evaluation_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -1116,6 +1160,8 @@ async def update_evaluation(
     evaluation.description = data.description
     evaluation.duration = data.duration
     evaluation.status = data.status
+    evaluation.scheduled_starts_at = data.scheduled_starts_at
+    evaluation.scheduled_ends_at = data.scheduled_ends_at
 
     if data.questions is not None:
         await _sync_questions(session, evaluation, data.questions)
