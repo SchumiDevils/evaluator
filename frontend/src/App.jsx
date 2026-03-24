@@ -82,26 +82,71 @@ function studentCardScheduleLine(a) {
   return null
 }
 
-function formatEvaluationScheduleLabel({ status, scheduled_starts_at, scheduled_ends_at }) {
+function formatEvaluationScheduleLabel({ status, scheduled_starts_at, scheduled_ends_at, start_at, end_at }) {
+  const startIso = start_at || scheduled_starts_at
+  const endIso = end_at || scheduled_ends_at
   if (status !== 'active') return null
-  if (!scheduled_starts_at && !scheduled_ends_at) return null
+  if (!startIso && !endIso) return null
   const fmt = (iso) => {
     const d = new Date(iso)
     return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ro-RO', { dateStyle: 'short', timeStyle: 'short' })
   }
   const now = Date.now()
-  const startMs = scheduled_starts_at ? new Date(scheduled_starts_at).getTime() : null
-  const endMs = scheduled_ends_at ? new Date(scheduled_ends_at).getTime() : null
+  const startMs = startIso ? new Date(startIso).getTime() : null
+  const endMs = endIso ? new Date(endIso).getTime() : null
   if (startMs != null && !Number.isNaN(startMs) && now < startMs) {
-    return `Începe ${fmt(scheduled_starts_at)}`
+    return `Începe ${fmt(startIso)}`
   }
   if (endMs != null && !Number.isNaN(endMs) && now > endMs) {
     return 'Fereastra s-a încheiat'
   }
   const parts = []
-  if (scheduled_starts_at) parts.push(`de la ${fmt(scheduled_starts_at)}`)
-  if (scheduled_ends_at) parts.push(`până la ${fmt(scheduled_ends_at)}`)
+  if (startIso) parts.push(`de la ${fmt(startIso)}`)
+  if (endIso) parts.push(`până la ${fmt(endIso)}`)
   return parts.length ? `Acces studenți: ${parts.join(' ')}` : null
+}
+
+/** minute în română pentru mesaje de formular */
+function formatMinutesRo(n) {
+  const x = Math.floor(Number(n))
+  if (x === 1) return '1 minut'
+  return `${x} minute`
+}
+
+/** Avertizare non-blocking: fereastra de acces mai scurtă decât durata evaluării */
+function accessWindowShorterThanDurationWarning(durationMinutes, scheduledStartsAtLocal, scheduledEndsAtLocal) {
+  const dm = Number(durationMinutes)
+  if (!dm || dm <= 0) return null
+  const a = String(scheduledStartsAtLocal || '').trim()
+  const b = String(scheduledEndsAtLocal || '').trim()
+  if (!a || !b) return null
+  const s = new Date(a).getTime()
+  const e = new Date(b).getTime()
+  if (Number.isNaN(s) || Number.isNaN(e) || e <= s) return null
+  const windowMinutes = Math.floor((e - s) / 60000)
+  if (windowMinutes <= 0 || windowMinutes >= dm) return null
+  return { windowMinutes, durationMinutes: dm }
+}
+
+/** Un singur badge: draft / programată / activă / încheiată / închis (listă + detaliu) */
+function unifiedEvalStatusBadge(assessment) {
+  if (assessment.status === 'draft') {
+    return { className: 'status-badge draft', label: 'draft' }
+  }
+  if (assessment.status === 'closed') {
+    return { className: 'status-badge closed', label: 'închis' }
+  }
+  const life = assessment.lifecycle_status
+  if (life === 'scheduled') {
+    return { className: 'status-badge lifecycle-scheduled', label: 'programată' }
+  }
+  if (life === 'closed') {
+    return { className: 'status-badge lifecycle-closed', label: 'încheiată' }
+  }
+  if (life === 'active') {
+    return { className: 'status-badge lifecycle-active', label: 'activă' }
+  }
+  return { className: 'status-badge active', label: 'activă' }
 }
 
 function RubrixDrawTitle() {
@@ -1696,14 +1741,10 @@ function App() {
               <p>{selectedAssessment.subject || 'Evaluare generală'}</p>
             </div>
             <div className="header-actions">
-              <span className={`status-badge ${selectedAssessment.status}`}>
-                {selectedAssessment.status}
-              </span>
-              {!isOwner && selectedAssessment.lifecycle_status && (
-                <span className={`status-badge lifecycle-${selectedAssessment.lifecycle_status}`}>
-                  {selectedAssessment.lifecycle_status}
-                </span>
-              )}
+              {(() => {
+                const st = unifiedEvalStatusBadge(selectedAssessment)
+                return <span className={st.className}>{st.label}</span>
+              })()}
               {isOwner && (
                 <>
                   <button className="btn-secondary" onClick={() => handleEditAssessment(selectedAssessment)}>
@@ -2662,6 +2703,22 @@ function App() {
                 />
               </label>
             </div>
+            {(() => {
+              const w = accessWindowShorterThanDurationWarning(
+                assessmentForm.duration,
+                assessmentForm.scheduled_starts_at,
+                assessmentForm.scheduled_ends_at
+              )
+              if (!w) return null
+              return (
+                <div className="form-schedule-duration-warning" role="status">
+                  Atenție: intervalul dintre începutul și sfârșitul accesului este de{' '}
+                  <strong>{formatMinutesRo(w.windowMinutes)}</strong>, mai mic decât durata evaluării de{' '}
+                  <strong>{formatMinutesRo(w.durationMinutes)}</strong>. Evaluarea va funcționa, dar studenții pot avea
+                  mai puțin timp disponibil pentru completare.
+                </div>
+              )
+            })()}
 
             <div className="questions-builder">
               <div className="questions-header">
@@ -2953,16 +3010,10 @@ function App() {
                       <h3>{assessment.title}</h3>
                       <span className="subject">{assessment.subject || 'General'}</span>
                     </div>
-                    {isProfessor && (
-                      <>
-                        <span className={`status-badge ${assessment.status}`}>{assessment.status}</span>
-                        {assessment.lifecycle_status && (
-                          <span className={`status-badge lifecycle-${assessment.lifecycle_status}`}>
-                            {assessment.lifecycle_status}
-                          </span>
-                        )}
-                      </>
-                    )}
+                    {isProfessor && (() => {
+                      const st = unifiedEvalStatusBadge(assessment)
+                      return <span className={st.className}>{st.label}</span>
+                    })()}
                   </div>
                   {scheduleHint && (
                     <p className="card-schedule-hint text-muted">{scheduleHint}</p>

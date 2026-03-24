@@ -1029,6 +1029,17 @@ html[data-theme="light"] {
   line-height: 1.45;
 }
 
+.form-schedule-duration-warning {
+  font-size: 0.875rem;
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.85rem;
+  border-radius: 8px;
+  border-left: 3px solid var(--warning);
+  background: var(--warning-light);
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
 .card-schedule-hint {
   font-size: 0.8125rem;
   margin: -0.5rem 0 0.75rem;
