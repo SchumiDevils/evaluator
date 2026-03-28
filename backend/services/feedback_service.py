@@ -32,8 +32,15 @@ def _auto_correct(answer: str, question: Question) -> tuple[bool, int, list[Feed
             correct_chosen = len(student_set & correct_set)
             wrong_chosen = len(student_set - correct_set)
             total_correct = len(correct_set)
-            partial = max(0, correct_chosen - wrong_chosen)
-            score = round(points * partial / total_correct) if total_correct > 0 else 0
+            total_options = len(question.options) if question.options else (total_correct + wrong_chosen)
+
+            net = correct_chosen - wrong_chosen
+            if net > 0:
+                score = round(points * net / total_correct)
+            elif correct_chosen > 0 and (correct_chosen + wrong_chosen) < total_options:
+                score = max(1, round(points * correct_chosen / total_options))
+            else:
+                score = 0
 
             display_correct = ", ".join(s.strip() for s in correct.replace("||", ",").split(",") if s.strip())
             fb = [FeedbackItemSchema(

@@ -2363,9 +2363,9 @@ html[data-theme="light"] {
   font-size: 0.75rem;
   word-break: break-all;
   padding: 0.5rem;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--primary-light, rgba(0, 0, 0, 0.25));
   border-radius: 8px;
-  color: #c4b5fd;
+  color: var(--text-primary);
 }
 
 /* Public exam (no auth) */
