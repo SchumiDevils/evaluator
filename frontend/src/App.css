@@ -1382,15 +1382,38 @@ html[data-theme="light"] {
   gap: 0.5rem;
 }
 
-.qb-option-bullet {
-  color: var(--text-muted);
-  font-size: 1.25rem;
-  width: 20px;
-  text-align: center;
+.qb-correct-input {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: #4caf50;
   flex-shrink: 0;
 }
 
-.qb-option-row input {
+.qb-correct-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.qb-option-row.correct {
+  background: rgba(76, 175, 80, 0.08);
+  border-radius: 6px;
+  padding: 2px 6px;
+  margin: -2px -6px;
+}
+
+.qb-option-row.correct input[type="text"] {
+  border-color: rgba(76, 175, 80, 0.4);
+}
+
+.qb-options-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+  font-style: italic;
+}
+
+.qb-option-row input[type="text"] {
   flex: 1;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border);
@@ -1400,7 +1423,7 @@ html[data-theme="light"] {
   background: var(--surface);
 }
 
-.qb-option-row input:focus {
+.qb-option-row input[type="text"]:focus {
   outline: none;
   border-color: var(--primary);
 }

@@ -971,7 +971,7 @@ function App() {
   const QUESTION_TYPES = [
     { value: 'long_answer', label: 'Răspuns lung' },
     { value: 'short_answer', label: 'Răspuns scurt' },
-    { value: 'multiple_choice', label: 'Alegere multiplă' },
+    { value: 'multiple_choice', label: 'Alegere singulară' },
     { value: 'checkboxes', label: 'Checkbox-uri' },
   ]
 
@@ -1087,6 +1087,7 @@ function App() {
         } else {
           questions[index].options = null
         }
+        questions[index].correct_answer = ''
       }
       return { ...p, questions }
     })
@@ -1095,9 +1096,24 @@ function App() {
   const updateOption = (qIndex, optIndex, value) => {
     setAssessmentForm((p) => {
       const questions = [...p.questions]
-      const options = [...(questions[qIndex].options || [])]
+      const q = { ...questions[qIndex] }
+      const oldValue = (q.options || [])[optIndex]
+      const options = [...(q.options || [])]
       options[optIndex] = value
-      questions[qIndex] = { ...questions[qIndex], options }
+      q.options = options
+
+      if (q.question_type === 'multiple_choice' && q.correct_answer === oldValue) {
+        q.correct_answer = value
+      } else if (q.question_type === 'checkboxes' && q.correct_answer) {
+        const parts = q.correct_answer.split('||').map(s => s.trim())
+        const fi = parts.indexOf(oldValue)
+        if (fi !== -1) {
+          parts[fi] = value
+          q.correct_answer = parts.join('||')
+        }
+      }
+
+      questions[qIndex] = q
       return { ...p, questions }
     })
   }
@@ -1114,8 +1130,18 @@ function App() {
   const removeOption = (qIndex, optIndex) => {
     setAssessmentForm((p) => {
       const questions = [...p.questions]
-      const options = (questions[qIndex].options || []).filter((_, i) => i !== optIndex)
-      questions[qIndex] = { ...questions[qIndex], options }
+      const q = { ...questions[qIndex] }
+      const removedValue = (q.options || [])[optIndex]
+      q.options = (q.options || []).filter((_, i) => i !== optIndex)
+
+      if (q.question_type === 'multiple_choice' && q.correct_answer === removedValue) {
+        q.correct_answer = ''
+      } else if (q.question_type === 'checkboxes' && q.correct_answer) {
+        const parts = q.correct_answer.split('||').map(s => s.trim()).filter(s => s !== removedValue)
+        q.correct_answer = parts.join('||')
+      }
+
+      questions[qIndex] = q
       return { ...p, questions }
     })
   }
@@ -1810,7 +1836,7 @@ function App() {
   // Navbar component
   const Navbar = () => (
     <header className="navbar">
-      <div className="nav-brand">
+      <div className="nav-brand" onClick={() => { setView('dashboard'); resetAssessmentForm(); setSelectedAssessment(null); }} style={{ cursor: 'pointer' }}>
         <div className="logo-icon">
           <Icons.Logo />
         </div>
@@ -2998,9 +3024,39 @@ function App() {
                   {(q.question_type === 'multiple_choice' || q.question_type === 'checkboxes') && (
                     <div className="qb-options">
                       <span className="qb-options-label">Opțiuni</span>
+                      <span className="qb-options-hint">Selectează răspunsul corect din opțiunile de mai jos</span>
                       {(q.options || []).map((opt, oi) => (
-                        <div className="qb-option-row" key={oi}>
-                          <span className="qb-option-bullet">{q.question_type === 'multiple_choice' ? '○' : '☐'}</span>
+                        <div className={`qb-option-row${
+                          q.question_type === 'multiple_choice'
+                            ? (q.correct_answer === opt && opt !== '' ? ' correct' : '')
+                            : ((q.correct_answer || '').split('||').map(s => s.trim()).includes(opt) && opt !== '' ? ' correct' : '')
+                        }`} key={oi}>
+                          {q.question_type === 'multiple_choice' ? (
+                            <input
+                              type="radio"
+                              name={`correct-${q._key || idx}`}
+                              checked={q.correct_answer === opt && opt !== ''}
+                              onChange={() => updateQuestion(idx, 'correct_answer', opt)}
+                              className="qb-correct-input"
+                              title="Marchează ca răspuns corect"
+                              disabled={!opt}
+                            />
+                          ) : (
+                            <input
+                              type="checkbox"
+                              checked={(q.correct_answer || '').split('||').map(s => s.trim()).includes(opt) && opt !== ''}
+                              onChange={() => {
+                                const parts = (q.correct_answer || '').split('||').map(s => s.trim()).filter(Boolean)
+                                const fi = parts.indexOf(opt)
+                                if (fi !== -1) parts.splice(fi, 1)
+                                else parts.push(opt)
+                                updateQuestion(idx, 'correct_answer', parts.join('||'))
+                              }}
+                              className="qb-correct-input"
+                              title="Marchează ca răspuns corect"
+                              disabled={!opt}
+                            />
+                          )}
                           <input
                             type="text"
                             value={opt}
@@ -3016,15 +3072,17 @@ function App() {
                     </div>
                   )}
 
-                  <label>
-                    Răspuns corect (opțional)
-                    <input
-                      type="text"
-                      value={q.correct_answer}
-                      onChange={(e) => updateQuestion(idx, 'correct_answer', e.target.value)}
-                      placeholder="Folosit pentru corectare automată (opțional)"
-                    />
-                  </label>
+                  {q.question_type !== 'multiple_choice' && q.question_type !== 'checkboxes' && (
+                    <label>
+                      Răspuns corect (opțional)
+                      <input
+                        type="text"
+                        value={q.correct_answer}
+                        onChange={(e) => updateQuestion(idx, 'correct_answer', e.target.value)}
+                        placeholder="Folosit pentru corectare automată (opțional)"
+                      />
+                    </label>
+                  )}
                 </div>
               ))}
             </div>
