@@ -248,7 +248,12 @@ const API_PREFIX = '/api/v1'
 // Icons as simple SVG components
 const Icons = {
   Logo: () => (
-    <img src={rubrixLogo} alt="Rubrix" width="28" height="28" />
+    <div
+      className="logo-svg-mask"
+      role="img"
+      aria-label="Rubrix"
+      style={{ WebkitMaskImage: `url(${rubrixLogo})`, maskImage: `url(${rubrixLogo})` }}
+    />
   ),
   Dashboard: () => (
     <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">

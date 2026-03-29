@@ -13,6 +13,7 @@
   --primary: #8B5CF6;
   --primary-dark: #7C3AED;
   --primary-light: rgba(139, 92, 246, 0.15);
+  --logo-color: #9ca3af;
 
   --bg: #060010;
   --surface: #0f0a1a;
@@ -62,6 +63,7 @@
 html[data-theme="light"] {
   color-scheme: light;
   --primary-light: rgba(124, 58, 237, 0.12);
+  --logo-color: #6521a1;
   --bg: #f3f0fa;
   --surface: #ffffff;
   --border: #ddd6eb;
@@ -161,7 +163,7 @@ html[data-theme="light"] {
   margin-bottom: 1rem;
 }
 
-.auth-logo .logo-icon img {
+.auth-logo .logo-icon .logo-svg-mask {
   width: 96px;
   height: 96px;
 }
@@ -351,9 +353,17 @@ html[data-theme="light"] {
   justify-content: center;
 }
 
-.logo-icon img {
+.logo-svg-mask {
   width: 36px;
   height: 36px;
+  background-color: var(--logo-color);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  transition: background-color 0.3s ease;
 }
 
 .nav-links {
