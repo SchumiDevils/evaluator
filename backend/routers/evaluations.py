@@ -8,7 +8,7 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import Response as HttpPdfResponse
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func, select
+from sqlalchemy import Float, case, cast, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -1095,6 +1095,190 @@ async def export_evaluation_pdf(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
+
+
+# --- Per-evaluation analytics schemas ---
+
+class EvalAnalyticsSummary(BaseModel):
+    total_participants: int = 0
+    total_responses: int = 0
+    avg_score_percent: float = 0
+    max_score_percent: float = 0
+    min_score_percent: float = 0
+
+
+class EvalScoreBucket(BaseModel):
+    range: str
+    count: int
+
+
+class EvalQuestionSuccess(BaseModel):
+    question_id: int
+    question_text: str
+    question_type: str
+    avg_percent: float
+    total_responses: int
+
+
+class EvalStudentScore(BaseModel):
+    name: str
+    total_score: int
+    max_points: int
+    percent: float
+
+
+class EvalAnalyticsResponse(BaseModel):
+    summary: EvalAnalyticsSummary
+    score_distribution: List[EvalScoreBucket]
+    question_success: List[EvalQuestionSuccess]
+    student_scores: List[EvalStudentScore]
+
+
+@router.get("/{evaluation_id}/analytics", response_model=EvalAnalyticsResponse)
+async def get_evaluation_analytics(
+    evaluation_id: int,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> EvalAnalyticsResponse:
+    ev_result = await session.execute(
+        select(Evaluation).where(
+            Evaluation.id == evaluation_id, Evaluation.author_id == current_user.id
+        )
+    )
+    if not ev_result.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evaluation not found")
+
+    # --- Gather all scored responses for this evaluation ---
+    resp_result = await session.execute(
+        select(
+            Response.id,
+            Response.score,
+            Response.user_id,
+            Response.guest_name,
+            Response.guest_class,
+            Response.public_session_token,
+            Question.points,
+            Question.id.label("qid"),
+            Question.text.label("qtext"),
+            Question.question_type,
+        )
+        .where(
+            Response.evaluation_id == evaluation_id,
+            Response.score.isnot(None),
+            Response.question_id == Question.id,
+            Question.points > 0,
+        )
+    )
+    rows = resp_result.all()
+
+    if not rows:
+        buckets_order = ["0-19%", "20-39%", "40-59%", "60-79%", "80-99%", "100%"]
+        return EvalAnalyticsResponse(
+            summary=EvalAnalyticsSummary(),
+            score_distribution=[EvalScoreBucket(range=b, count=0) for b in buckets_order],
+            question_success=[],
+            student_scores=[],
+        )
+
+    # --- Build per-participant aggregates ---
+    from collections import defaultdict
+
+    participants: dict[str, dict] = {}
+    question_stats: dict[int, dict] = defaultdict(lambda: {"text": "", "type": "", "total_score": 0, "total_points": 0, "count": 0})
+
+    for r in rows:
+        if r.user_id is not None:
+            pkey = f"u-{r.user_id}"
+            pname = None
+        else:
+            gn = (r.guest_name or "").strip()
+            gc = (r.guest_class or "").strip()
+            pkey = f"g-{gn}|{gc}|{r.public_session_token or ''}"
+            pname = gn + (f" ({gc})" if gc else "")
+
+        if pkey not in participants:
+            participants[pkey] = {"name": pname, "user_id": r.user_id, "total_score": 0, "max_points": 0}
+        participants[pkey]["total_score"] += r.score or 0
+        participants[pkey]["max_points"] += r.points or 0
+
+        qs = question_stats[r.qid]
+        qs["text"] = r.qtext
+        qs["type"] = r.question_type
+        qs["total_score"] += r.score or 0
+        qs["total_points"] += r.points or 0
+        qs["count"] += 1
+
+    # Resolve user names for logged-in participants
+    user_ids = [p["user_id"] for p in participants.values() if p["user_id"] is not None]
+    user_names: dict[int, str] = {}
+    if user_ids:
+        users_result = await session.execute(
+            select(User.id, User.full_name).where(User.id.in_(user_ids))
+        )
+        user_names = {uid: name or f"User #{uid}" for uid, name in users_result.all()}
+
+    student_scores: list[EvalStudentScore] = []
+    percents: list[float] = []
+    for p in participants.values():
+        name = p["name"] if p["name"] else user_names.get(p["user_id"], f"User #{p['user_id']}")
+        pct = round(p["total_score"] * 100 / p["max_points"], 1) if p["max_points"] > 0 else 0
+        percents.append(pct)
+        student_scores.append(EvalStudentScore(
+            name=name,
+            total_score=p["total_score"],
+            max_points=p["max_points"],
+            percent=pct,
+        ))
+
+    student_scores.sort(key=lambda s: s.percent, reverse=True)
+
+    # --- Summary ---
+    summary = EvalAnalyticsSummary(
+        total_participants=len(participants),
+        total_responses=len(rows),
+        avg_score_percent=round(sum(percents) / len(percents), 1) if percents else 0,
+        max_score_percent=max(percents) if percents else 0,
+        min_score_percent=min(percents) if percents else 0,
+    )
+
+    # --- Score distribution (per student) ---
+    buckets_order = ["0-19%", "20-39%", "40-59%", "60-79%", "80-99%", "100%"]
+    bucket_counts: dict[str, int] = {b: 0 for b in buckets_order}
+    for pct in percents:
+        if pct < 20:
+            bucket_counts["0-19%"] += 1
+        elif pct < 40:
+            bucket_counts["20-39%"] += 1
+        elif pct < 60:
+            bucket_counts["40-59%"] += 1
+        elif pct < 80:
+            bucket_counts["60-79%"] += 1
+        elif pct < 100:
+            bucket_counts["80-99%"] += 1
+        else:
+            bucket_counts["100%"] += 1
+
+    score_distribution = [EvalScoreBucket(range=b, count=bucket_counts[b]) for b in buckets_order]
+
+    # --- Per-question success ---
+    question_success = []
+    for qid in sorted(question_stats.keys()):
+        qs = question_stats[qid]
+        avg_pct = round(qs["total_score"] * 100 / qs["total_points"], 1) if qs["total_points"] > 0 else 0
+        question_success.append(EvalQuestionSuccess(
+            question_id=qid,
+            question_text=qs["text"][:80],
+            question_type=qs["type"],
+            avg_percent=avg_pct,
+            total_responses=qs["count"],
+        ))
+
+    return EvalAnalyticsResponse(
+        summary=summary,
+        score_distribution=score_distribution,
+        question_success=question_success,
+        student_scores=student_scores,
     )
 
 

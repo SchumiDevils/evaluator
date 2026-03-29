@@ -423,6 +423,7 @@ function App() {
   const [expandedStudents, setExpandedStudents] = useState({})
   const [joinCode, setJoinCode] = useState('')
   const [isJoining, setIsJoining] = useState(false)
+  const [evalAnalytics, setEvalAnalytics] = useState(null)
 
   const [theme, setTheme] = useState(() =>
     typeof localStorage !== 'undefined' && localStorage.getItem('rubrix-theme') === 'light'
@@ -1195,6 +1196,7 @@ function App() {
     setStudentResponses([])
     setReevalForm({})
     setExpandedStudents({})
+    setEvalAnalytics(null)
     setView('detail')
 
     const isOwner = user?.role === 'professor' && assessment.author_id === user?.id
@@ -1376,6 +1378,22 @@ function App() {
       setError('Nu s-au putut încărca răspunsurile studenților.')
     }
     return []
+  }
+
+  const fetchEvalAnalytics = async (evaluationId) => {
+    try {
+      const res = await fetch(`${API_URL}${API_PREFIX}/evaluations/${evaluationId}/analytics`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setEvalAnalytics(data)
+        return data
+      }
+    } catch {
+      setError('Nu s-au putut încărca datele analitice.')
+    }
+    return null
   }
 
   const handleExportPdf = async () => {
@@ -1909,6 +1927,19 @@ function App() {
     </>
   )
 
+  // Chart constants (shared between detail-analytics and global analytics views)
+  const CHART_COLORS = ['#8B5CF6', '#A78BFA', '#7C3AED', '#6D28D9', '#C4B5FD', '#DDD6FE']
+  const chartTooltipStyle = {
+    contentStyle: {
+      background: 'var(--chart-tooltip-bg)',
+      border: '1px solid var(--chart-tooltip-border)',
+      borderRadius: 8,
+      color: 'var(--chart-tooltip-fg)',
+    },
+    labelStyle: { color: 'var(--chart-axis)' },
+    itemStyle: { color: 'var(--chart-tooltip-fg)' },
+  }
+
   // Assessment Detail view
   if (view === 'detail' && selectedAssessment) {
     const isOwner = user?.role === 'professor' && selectedAssessment.author_id === user?.id
@@ -2008,6 +2039,10 @@ function App() {
               <button className={detailTab === 'responses' ? 'active' : ''} onClick={() => { setDetailTab('responses'); fetchStudentResponses(selectedAssessment.id) }}>
                 <Icons.People />
                 Răspunsuri studenți ({studentResponses.length})
+              </button>
+              <button className={detailTab === 'analytics' ? 'active' : ''} onClick={() => { setDetailTab('analytics'); fetchEvalAnalytics(selectedAssessment.id) }}>
+                <Icons.Chart />
+                Analiză
               </button>
             </div>
           )}
@@ -2348,6 +2383,104 @@ function App() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {detailTab === 'analytics' && isOwner && (
+            <div className="eval-analytics-view">
+              {!evalAnalytics ? (
+                <div className="empty-state">
+                  <Icons.Chart />
+                  <p>Se încarcă datele analitice...</p>
+                </div>
+              ) : evalAnalytics.summary.total_participants === 0 ? (
+                <div className="empty-state">
+                  <Icons.Chart />
+                  <p>Nu există date suficiente pentru analiză. Niciun student nu a răspuns încă.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="eval-analytics-grid">
+                    <div className="eval-stat-card">
+                      <span className="eval-stat-value">{evalAnalytics.summary.total_participants}</span>
+                      <span className="eval-stat-label">Participanți</span>
+                    </div>
+                    <div className="eval-stat-card">
+                      <span className="eval-stat-value">{evalAnalytics.summary.avg_score_percent}%</span>
+                      <span className="eval-stat-label">Media clasei</span>
+                    </div>
+                    <div className="eval-stat-card">
+                      <span className="eval-stat-value">{evalAnalytics.summary.max_score_percent}%</span>
+                      <span className="eval-stat-label">Cel mai mare scor</span>
+                    </div>
+                    <div className="eval-stat-card">
+                      <span className="eval-stat-value">{evalAnalytics.summary.min_score_percent}%</span>
+                      <span className="eval-stat-label">Cel mai mic scor</span>
+                    </div>
+                  </div>
+
+                  <div className="analytics-card">
+                    <h3>Distribuția Scorurilor</h3>
+                    <p className="analytics-subtitle">Câți studenți per interval de scor</p>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <BarChart data={evalAnalytics.score_distribution} margin={{ top: 20, right: 20, bottom: 20, left: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                        <XAxis dataKey="range" stroke="var(--chart-axis)" fontSize={12} />
+                        <YAxis stroke="var(--chart-axis)" fontSize={12} allowDecimals={false} />
+                        <Tooltip {...chartTooltipStyle} />
+                        <Bar dataKey="count" name="Studenți" radius={[6, 6, 0, 0]}>
+                          {evalAnalytics.score_distribution.map((_, i) => (
+                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {evalAnalytics.question_success.length > 0 && (
+                    <div className="analytics-card">
+                      <h3>Rata de Succes per Întrebare</h3>
+                      <p className="analytics-subtitle">Procentul mediu obținut la fiecare întrebare</p>
+                      <ResponsiveContainer width="100%" height={Math.max(300, evalAnalytics.question_success.length * 50)}>
+                        <BarChart data={evalAnalytics.question_success} layout="vertical" margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                          <XAxis type="number" stroke="var(--chart-axis)" fontSize={12} domain={[0, 100]} unit="%" />
+                          <YAxis type="category" dataKey="question_text" stroke="var(--chart-axis)" fontSize={11} width={200} tick={{ fill: 'var(--chart-tick-fill)' }} />
+                          <Tooltip {...chartTooltipStyle} formatter={(v) => `${v}%`} />
+                          <Bar dataKey="avg_percent" name="Media %" radius={[0, 6, 6, 0]}>
+                            {evalAnalytics.question_success.map((entry, i) => (
+                              <Cell key={i} fill={entry.avg_percent >= 70 ? '#22c55e' : entry.avg_percent >= 40 ? '#f59e0b' : '#ef4444'} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+
+                  {evalAnalytics.student_scores.length > 0 && (
+                    <div className="analytics-card">
+                      <h3>Clasamentul Studenților</h3>
+                      <p className="analytics-subtitle">Scorurile totale ale studenților, ordonate descrescător</p>
+                      <ResponsiveContainer width="100%" height={Math.max(300, evalAnalytics.student_scores.length * 45)}>
+                        <BarChart data={evalAnalytics.student_scores} layout="vertical" margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                          <XAxis type="number" stroke="var(--chart-axis)" fontSize={12} domain={[0, 100]} unit="%" />
+                          <YAxis type="category" dataKey="name" stroke="var(--chart-axis)" fontSize={11} width={160} tick={{ fill: 'var(--chart-tick-fill)' }} />
+                          <Tooltip
+                            {...chartTooltipStyle}
+                            formatter={(value, _name, props) => [`${props.payload.total_score}/${props.payload.max_points} (${value}%)`, 'Scor']}
+                          />
+                          <Bar dataKey="percent" name="Scor %" radius={[0, 6, 6, 0]}>
+                            {evalAnalytics.student_scores.map((entry, i) => (
+                              <Cell key={i} fill={entry.percent >= 70 ? '#22c55e' : entry.percent >= 40 ? '#f59e0b' : '#ef4444'} />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -2725,18 +2858,6 @@ function App() {
   }
 
   // Analytics view
-  const CHART_COLORS = ['#8B5CF6', '#A78BFA', '#7C3AED', '#6D28D9', '#C4B5FD', '#DDD6FE']
-  const chartTooltipStyle = {
-    contentStyle: {
-      background: 'var(--chart-tooltip-bg)',
-      border: '1px solid var(--chart-tooltip-border)',
-      borderRadius: 8,
-      color: 'var(--chart-tooltip-fg)',
-    },
-    labelStyle: { color: 'var(--chart-axis)' },
-    itemStyle: { color: 'var(--chart-tooltip-fg)' },
-  }
-
   if (view === 'analytics') {
     const score_distribution = analyticsData?.score_distribution || []
     const question_success = analyticsData?.question_success || []
