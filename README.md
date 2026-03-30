@@ -26,7 +26,6 @@ modele NLP (OpenAI sau Hugging Face).
 
 ## Cum rulezi local
 
-
 ### 1. Backend FastAPI
 
 - **Windows (un singur pas):**
