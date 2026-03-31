@@ -74,6 +74,7 @@ Configurează API-ul prin `.env` (implicit `http://localhost:8000`):
 VITE_API_URL=http://localhost:8000
 ```
 
+
 ## Funcționalități implementate
 
 - Autentificare JWT (login/register) + roluri student/profesor;
