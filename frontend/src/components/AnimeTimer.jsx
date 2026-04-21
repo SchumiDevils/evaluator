@@ -61,28 +61,22 @@ export default function AnimeTimer({ timeRemaining, totalDuration, timerExpired 
     }
   }, [isDanger, timerExpired])
 
-  const strokeColor = timerExpired
+  const strokeColor = timerExpired || isDanger
     ? '#F87171'
-    : isDanger
-      ? '#F87171'
-      : isWarning
-        ? '#FBBF24'
-        : `url(#${gradMain})`
+    : isWarning
+      ? '#FBBF24'
+      : `url(#${gradMain})`
 
-  const textColor = timerExpired
-    ? 'var(--danger)'
-    : isDanger
-      ? 'var(--danger)'
-      : isWarning
-        ? 'var(--warning)'
-        : 'var(--text-primary)'
+  const textColor = timerExpired || isDanger
+    ? '#F87171'
+    : isWarning
+      ? '#FBBF24'
+      : 'var(--foreground)'
 
   return (
-    <div
-      className={`anime-timer ${timerExpired ? 'expired' : ''} ${isDanger ? 'danger' : ''} ${isWarning ? 'warning' : ''}`}
-    >
-      <div className="anime-timer-ring" ref={glowRef}>
-        <svg viewBox="0 0 120 120" className="anime-timer-svg">
+    <div className="flex flex-col items-center gap-2">
+      <div className="relative h-32 w-32" ref={glowRef}>
+        <svg viewBox="0 0 120 120" className="h-full w-full">
           <defs>
             <linearGradient id={gradMain} x1="0%" y1="0%" x2="100%" y2="100%">
               <stop offset="0%" stopColor="#a78bfa" />
@@ -124,19 +118,25 @@ export default function AnimeTimer({ timeRemaining, totalDuration, timerExpired 
           />
         </svg>
 
-        <div className="anime-timer-content" ref={digitsRef} style={{ color: textColor }}>
+        <div
+          className="absolute inset-0 flex flex-col items-center justify-center"
+          ref={digitsRef}
+          style={{ color: textColor }}
+        >
           {timerExpired ? (
-            <span className="anime-timer-expired">Expirat</span>
+            <span className="text-lg font-bold">Expirat</span>
           ) : (
-            <div className="anime-timer-digits">
+            <div className="flex items-center font-mono text-2xl font-bold tracking-wider">
               <span className="anime-digit">{mm[0]}</span>
               <span className="anime-digit">{mm[1]}</span>
-              <span className="anime-timer-sep">:</span>
+              <span className="mx-px opacity-60">:</span>
               <span className="anime-digit">{ss[0]}</span>
               <span className="anime-digit">{ss[1]}</span>
             </div>
           )}
-          {!timerExpired && <span className="anime-timer-label">rămase</span>}
+          {!timerExpired && (
+            <span className="mt-1 text-xs text-muted-foreground">rămase</span>
+          )}
         </div>
       </div>
     </div>

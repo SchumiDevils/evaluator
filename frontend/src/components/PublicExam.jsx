@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import AnimeTimer from './components/AnimeTimer'
-import './App.css'
+import AnimeTimer from './AnimeTimer'
 
 const API_PREFIX = '/api/v1'
 const sessionKey = (linkId) => `rubrix_public_session_${linkId}`
@@ -35,14 +34,6 @@ function formatSecondsCountdown(totalSec) {
   return `${sec} s`
 }
 
-const Icons = {
-  Send: () => (
-    <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-      <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-    </svg>
-  ),
-}
-
 export default function PublicExam({ linkId, apiUrl }) {
   const [evalData, setEvalData] = useState(null)
   const [loadError, setLoadError] = useState('')
@@ -62,7 +53,6 @@ export default function PublicExam({ linkId, apiUrl }) {
   const [startError, setStartError] = useState('')
   const [scheduleTick, setScheduleTick] = useState(0)
   const [gateSecondsLeft, setGateSecondsLeft] = useState(null)
-  /** Întrebări în ordine amestecată per sesiune (de la POST /start, nu din GET public). */
   const [sessionQuestions, setSessionQuestions] = useState(null)
 
   const load = useCallback(async () => {
@@ -83,9 +73,7 @@ export default function PublicExam({ linkId, apiUrl }) {
         if (data.lifecycle_status === 'scheduled' || (data.schedule_access_blocked === true && data.schedule_block_kind === 'before_start')) {
           sessionStorage.removeItem(sessionKey(linkId))
         }
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
       setEvalData(data)
       if (data.seconds_until_start != null) {
         setGateSecondsLeft(data.seconds_until_start)
@@ -97,14 +85,10 @@ export default function PublicExam({ linkId, apiUrl }) {
     }
   }, [apiUrl, linkId])
 
-  useEffect(() => {
-    load()
-  }, [load])
+  useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState === 'visible') load()
-    }
+    const onVis = () => { if (document.visibilityState === 'visible') load() }
     document.addEventListener('visibilitychange', onVis)
     return () => document.removeEventListener('visibilitychange', onVis)
   }, [load])
@@ -113,8 +97,7 @@ export default function PublicExam({ linkId, apiUrl }) {
     setStartError('')
     setSessionReady(false)
     setSessionQuestions(null)
-    let stored =
-      typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(sessionKey(linkId)) : null
+    let stored = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(sessionKey(linkId)) : null
     try {
       for (let attempt = 0; attempt < 2; attempt++) {
         const body = stored ? { session_token: stored } : {}
@@ -137,21 +120,16 @@ export default function PublicExam({ linkId, apiUrl }) {
         sessionStorage.setItem(sessionKey(linkId), data.session_token)
         setSessionQuestions(Array.isArray(data.questions) ? data.questions : [])
         try {
-          const raw =
-            typeof sessionStorage !== 'undefined'
-              ? sessionStorage.getItem(feedbackStorageKey(linkId, data.session_token))
-              : null
+          const raw = typeof sessionStorage !== 'undefined'
+            ? sessionStorage.getItem(feedbackStorageKey(linkId, data.session_token))
+            : null
           if (raw) {
             const parsed = JSON.parse(raw)
-            if (parsed && typeof parsed === 'object') {
-              setFeedbackResults(parsed)
-            }
+            if (parsed && typeof parsed === 'object') setFeedbackResults(parsed)
           } else {
             setFeedbackResults({})
           }
-        } catch {
-          setFeedbackResults({})
-        }
+        } catch { setFeedbackResults({}) }
         const rem = Math.max(0, data.seconds_remaining ?? 0)
         const durCap = Math.max(60, (data.duration_minutes || 30) * 60)
         setTotalSeconds(rem > 0 ? rem : durCap)
@@ -202,10 +180,7 @@ export default function PublicExam({ linkId, apiUrl }) {
     if (!sessionReady || timerExpired) return
     const id = setInterval(() => {
       setTimeRemaining((prev) => {
-        if (prev == null || prev <= 0) {
-          setTimerExpired(true)
-          return 0
-        }
+        if (prev == null || prev <= 0) { setTimerExpired(true); return 0 }
         const next = prev - 1
         if (next <= 0) setTimerExpired(true)
         return next
@@ -215,18 +190,10 @@ export default function PublicExam({ linkId, apiUrl }) {
   }, [sessionReady, timerExpired])
 
   const handleSubmitAnswer = async (questionId, answerText) => {
-    if (feedbackResults[questionId]) {
-      return
-    }
+    if (feedbackResults[questionId]) return
     const name = guestName.trim()
-    if (!name) {
-      setSubmitError('Introdu numele înainte de a trimite.')
-      return
-    }
-    if (!answerText?.trim()) {
-      setSubmitError('Introdu un răspuns.')
-      return
-    }
+    if (!name) { setSubmitError('Introdu numele înainte de a trimite.'); return }
+    if (!answerText?.trim()) { setSubmitError('Introdu un răspuns.'); return }
     if (!sessionToken || timerExpired || (timeRemaining != null && timeRemaining <= 0)) {
       setSubmitError('Timpul a expirat; nu mai poți trimite răspunsuri.')
       return
@@ -257,20 +224,12 @@ export default function PublicExam({ linkId, apiUrl }) {
       }
       const data = await res.json()
       setFeedbackResults((prev) => {
-        const next = {
-          ...prev,
-          [questionId]: {
-            score: data.score,
-            feedback: data.feedback || [],
-          },
-        }
+        const next = { ...prev, [questionId]: { score: data.score, feedback: data.feedback || [] } }
         try {
           if (typeof sessionStorage !== 'undefined' && sessionToken) {
             sessionStorage.setItem(feedbackStorageKey(linkId, sessionToken), JSON.stringify(next))
           }
-        } catch {
-          /* ignore quota / private mode */
-        }
+        } catch { /* ignore */ }
         return next
       })
     } catch (e) {
@@ -280,235 +239,282 @@ export default function PublicExam({ linkId, apiUrl }) {
     }
   }
 
+  /* ── Wrapper helpers ── */
+  const PageShell = ({ children }) => (
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
+        {children}
+      </div>
+    </div>
+  )
+
+  const Card = ({ children, className = '' }) => (
+    <div className={`rounded-lg border border-border bg-card p-6 shadow-sm ${className}`}>
+      {children}
+    </div>
+  )
+
+  const ErrorBanner = ({ children }) => (
+    <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+      {children}
+    </div>
+  )
+
+  const PrimaryBtn = ({ children, disabled, onClick, className = '' }) => (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50 ${className}`}
+    >
+      {children}
+    </button>
+  )
+
+  const SecondaryBtn = ({ children, onClick }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+    >
+      {children}
+    </button>
+  )
+
+  const inputCls = 'w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2 disabled:opacity-50'
+
+  /* ── Error / Loading states ── */
   if (loadError) {
     return (
-      <div className="public-exam-page">
-        <div className="public-exam-card">
-          <p className="error-msg">{loadError}</p>
-        </div>
-      </div>
+      <PageShell>
+        <Card><p className="text-destructive font-medium">{loadError}</p></Card>
+      </PageShell>
     )
   }
 
   if (!evalData) {
     return (
-      <div className="public-exam-page">
-        <div className="public-exam-card">
-          <p className="text-muted">Se încarcă...</p>
-        </div>
-      </div>
+      <PageShell>
+        <Card><p className="text-muted-foreground">Se încarcă...</p></Card>
+      </PageShell>
     )
   }
 
   const startIsoPub = evalData.start_at || evalData.scheduled_starts_at
-  const gateLabelPub =
-    gateSecondsLeft != null ? formatSecondsCountdown(gateSecondsLeft) : formatCountdownToStart(startIsoPub)
+  const gateLabelPub = gateSecondsLeft != null ? formatSecondsCountdown(gateSecondsLeft) : formatCountdownToStart(startIsoPub)
 
+  /* ── Wait for schedule ── */
   if (waitForStart) {
     const nq = evalData.question_count ?? 0
     return (
-      <div className="public-exam-page">
-        <div className="public-exam-card public-exam-schedule-wait">
-          <h1>{evalData.title}</h1>
-          {evalData.subject && <p className="public-exam-subject">{evalData.subject}</p>}
-          {evalData.description && <p className="text-muted">{evalData.description}</p>}
-          <p className="text-muted">Stare (server): <strong>{evalData.lifecycle_status || 'scheduled'}</strong></p>
-          <h2 className="public-schedule-wait-title">Fereastra nu e deschisă — evaluarea e programată</h2>
-          <p className="public-schedule-countdown" key={scheduleTick} aria-live="polite">
-            Rămâne până la start_at: <strong>{gateLabelPub}</strong>
+      <PageShell>
+        <Card>
+          <h1 className="text-2xl font-bold">{evalData.title}</h1>
+          {evalData.subject && <p className="mt-1 text-sm font-medium text-muted-foreground">{evalData.subject}</p>}
+          {evalData.description && <p className="mt-2 text-sm text-muted-foreground">{evalData.description}</p>}
+          <p className="mt-2 text-sm text-muted-foreground">
+            Stare (server): <strong>{evalData.lifecycle_status || 'scheduled'}</strong>
           </p>
+
+          <h2 className="mt-6 text-lg font-semibold text-amber-500">
+            Fereastra nu e deschisă — evaluarea e programată
+          </h2>
+          <p className="mt-2 text-base" key={scheduleTick} aria-live="polite">
+            Rămâne până la start: <strong className="text-primary">{gateLabelPub}</strong>
+          </p>
+
           {evalData.server_now && (
-            <p className="text-muted">Timp server: {new Date(evalData.server_now).toLocaleString('ro-RO')}</p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Timp server: {new Date(evalData.server_now).toLocaleString('ro-RO')}
+            </p>
           )}
-          <p className="text-muted">
+          <p className="mt-2 text-sm text-muted-foreground">
             Start fereastră:{' '}
-            {startIsoPub
-              ? new Date(startIsoPub).toLocaleString('ro-RO', {
-                  dateStyle: 'full',
-                  timeStyle: 'short',
-                })
-              : '—'}
+            {startIsoPub ? new Date(startIsoPub).toLocaleString('ro-RO', { dateStyle: 'full', timeStyle: 'short' }) : '—'}
           </p>
-          <p className="text-muted">
-            În fereastra activă ai maxim {evalData.duration} minute pentru completare după ce începi (nu încep la
-            încărcarea paginii).
+          <p className="mt-2 text-sm text-muted-foreground">
+            În fereastra activă ai maxim {evalData.duration} minute pentru completare după ce începi.
             {nq > 0 ? ` ${nq} exerciții.` : ''} Pagina se actualizează singură.
           </p>
-          <button type="button" className="btn-secondary" style={{ marginTop: '1rem' }} onClick={() => load()}>
-            Reîmprospătează acum
-          </button>
-        </div>
-      </div>
+
+          <div className="mt-4">
+            <SecondaryBtn onClick={() => load()}>Reîmprospătează acum</SecondaryBtn>
+          </div>
+        </Card>
+      </PageShell>
     )
   }
 
+  /* ── Closed ── */
   const showClosedPublic =
     evalData.lifecycle_status === 'closed' ||
     (evalData.schedule_access_blocked === true && evalData.schedule_block_kind === 'after_end')
 
   if (showClosedPublic) {
     return (
-      <div className="public-exam-page">
-        <div className="public-exam-card public-exam-schedule-ended">
-          <h1>{evalData.title}</h1>
-          <h2>Fereastra s-a încheiat</h2>
-          <p className="text-muted">{evalData.schedule_block_message}</p>
-          <p className="text-muted">Nu mai poți începe sau continua această evaluare prin acest link.</p>
-        </div>
-      </div>
+      <PageShell>
+        <Card>
+          <h1 className="text-2xl font-bold">{evalData.title}</h1>
+          <h2 className="mt-4 text-lg font-semibold text-destructive">Fereastra s-a încheiat</h2>
+          <p className="mt-2 text-sm text-muted-foreground">{evalData.schedule_block_message}</p>
+          <p className="mt-1 text-sm text-muted-foreground">Nu mai poți începe sau continua această evaluare prin acest link.</p>
+        </Card>
+      </PageShell>
     )
   }
 
   if (publicScheduleBlocked) {
     return (
-      <div className="public-exam-page">
-        <div className="public-exam-card">
-          <h1>{evalData.title}</h1>
-          <p className="error-msg">{evalData.schedule_block_message || 'Evaluarea nu este disponibilă acum.'}</p>
-          <button type="button" className="btn-secondary" onClick={() => load()}>
-            Reîncearcă
-          </button>
-        </div>
-      </div>
+      <PageShell>
+        <Card>
+          <h1 className="text-2xl font-bold">{evalData.title}</h1>
+          <p className="mt-2 text-destructive font-medium">{evalData.schedule_block_message || 'Evaluarea nu este disponibilă acum.'}</p>
+          <div className="mt-4">
+            <SecondaryBtn onClick={() => load()}>Reîncearcă</SecondaryBtn>
+          </div>
+        </Card>
+      </PageShell>
     )
   }
 
   if (startError) {
     return (
-      <div className="public-exam-page">
-        <div className="public-exam-card">
-          <p className="error-msg">{startError}</p>
-          <button type="button" className="btn-primary" style={{ marginTop: '1rem' }} onClick={() => startSession()}>
-            Reîncearcă
-          </button>
-        </div>
-      </div>
+      <PageShell>
+        <Card>
+          <p className="text-destructive font-medium">{startError}</p>
+          <div className="mt-4">
+            <PrimaryBtn onClick={() => startSession()}>Reîncearcă</PrimaryBtn>
+          </div>
+        </Card>
+      </PageShell>
     )
   }
 
   if (!sessionReady || sessionToken == null || timeRemaining == null) {
     return (
-      <div className="public-exam-page">
-        <div className="public-exam-card">
-          <p className="text-muted">Se pregătește sesiunea și cronometrul...</p>
-        </div>
-      </div>
+      <PageShell>
+        <Card><p className="text-muted-foreground">Se pregătește sesiunea și cronometrul...</p></Card>
+      </PageShell>
     )
   }
 
+  /* ── Main exam view ── */
   const questions = sessionQuestions ?? []
   const canAnswer = guestName.trim().length > 0 && !timerExpired && timeRemaining > 0
   const timerBlock = timerExpired || timeRemaining <= 0
 
   return (
-    <div className="public-exam-page">
-      <div className="public-exam-header">
-        <div className="public-exam-header-row">
-          <div className="public-exam-header-text">
-            <h1>{evalData.title}</h1>
-            {evalData.subject && <p className="public-exam-subject">{evalData.subject}</p>}
-            {evalData.description && <p className="text-muted">{evalData.description}</p>}
+    <PageShell>
+      {/* Header */}
+      <Card>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex-1 space-y-1">
+            <h1 className="text-2xl font-bold">{evalData.title}</h1>
+            {evalData.subject && <p className="text-sm font-medium text-muted-foreground">{evalData.subject}</p>}
+            {evalData.description && <p className="text-sm text-muted-foreground">{evalData.description}</p>}
             {(evalData.start_at || evalData.end_at || evalData.scheduled_starts_at || evalData.scheduled_ends_at) && (
-              <p className="text-muted public-exam-timer-hint">
-                Fereastră acces (start → end):{' '}
+              <p className="text-xs text-muted-foreground">
+                Fereastră:{' '}
                 {(evalData.start_at || evalData.scheduled_starts_at)
-                  ? new Date(evalData.start_at || evalData.scheduled_starts_at).toLocaleString('ro-RO', {
-                      dateStyle: 'short',
-                      timeStyle: 'short',
-                    })
+                  ? new Date(evalData.start_at || evalData.scheduled_starts_at).toLocaleString('ro-RO', { dateStyle: 'short', timeStyle: 'short' })
                   : '—'}
                 {' → '}
                 {(evalData.end_at || evalData.scheduled_ends_at)
-                  ? new Date(evalData.end_at || evalData.scheduled_ends_at).toLocaleString('ro-RO', {
-                      dateStyle: 'short',
-                      timeStyle: 'short',
-                    })
+                  ? new Date(evalData.end_at || evalData.scheduled_ends_at).toLocaleString('ro-RO', { dateStyle: 'short', timeStyle: 'short' })
                   : '—'}
               </p>
             )}
-            <p className="text-muted public-exam-timer-hint">
+            <p className="text-xs text-muted-foreground">
               După început: maxim {evalData.duration} minute pentru completare (și nu după end_at). Stare:{' '}
               <strong>{evalData.lifecycle_status || 'active'}</strong>.
             </p>
           </div>
-          <div className="public-exam-timer-wrap">
-            <AnimeTimer
-              timeRemaining={timeRemaining}
-              totalDuration={totalSeconds}
-              timerExpired={timerExpired}
+          <div className="flex-shrink-0">
+            <AnimeTimer timeRemaining={timeRemaining} totalDuration={totalSeconds} timerExpired={timerExpired} />
+          </div>
+        </div>
+      </Card>
+
+      {/* Timer expired banner */}
+      {timerBlock && (evalData.lifecycle_status === 'active' || !evalData.lifecycle_status) && (
+        <ErrorBanner>
+          Timpul pentru completare în această sesiune a expirat. Nu mai poți trimite răspunsuri noi.
+        </ErrorBanner>
+      )}
+
+      {/* Guest info */}
+      <Card>
+        <h3 className="mb-3 text-sm font-semibold">Date participant</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Nume complet *</label>
+            <input
+              type="text"
+              value={guestName}
+              onChange={(e) => setGuestName(e.target.value)}
+              placeholder="Ex: Ion Popescu"
+              className={inputCls}
+              disabled={timerBlock}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">Clasă / grup</label>
+            <input
+              type="text"
+              value={guestClass}
+              onChange={(e) => setGuestClass(e.target.value)}
+              placeholder="Ex: 10A"
+              className={inputCls}
+              disabled={timerBlock}
             />
           </div>
         </div>
-      </div>
+      </Card>
 
-      {timerBlock && (evalData.lifecycle_status === 'active' || !evalData.lifecycle_status) && (
-        <div className="notification error public-exam-notice">
-          Timpul pentru completare în această sesiune a expirat (durată examen și/sau închiderea ferestrei). Nu mai
-          poți trimite răspunsuri noi.
-        </div>
-      )}
-
-      <div className="public-exam-card">
-        <h3>Date participant</h3>
-        <label className="public-exam-label">
-          Nume complet *
-          <input
-            type="text"
-            value={guestName}
-            onChange={(e) => setGuestName(e.target.value)}
-            placeholder="Ex: Ion Popescu"
-            className="public-exam-input"
-            disabled={timerBlock}
-          />
-        </label>
-        <label className="public-exam-label">
-          Clasă / grup
-          <input
-            type="text"
-            value={guestClass}
-            onChange={(e) => setGuestClass(e.target.value)}
-            placeholder="Ex: 10A"
-            className="public-exam-input"
-            disabled={timerBlock}
-          />
-        </label>
-      </div>
-
-      <div className="public-exam-card">
-        <span className="public-exam-label">Mod feedback</span>
+      {/* Feedback mode */}
+      <Card>
+        <label className="mb-1 block text-xs font-medium text-muted-foreground">Mod feedback</label>
         <select
           value={feedbackMode}
           onChange={(e) => setFeedbackMode(e.target.value)}
-          className="public-exam-input"
+          className={inputCls}
           disabled={!canAnswer || timerBlock}
         >
           <option value="ai">AI</option>
           <option value="rule_based">Reguli simple</option>
         </select>
-      </div>
+      </Card>
 
-      {submitError && <div className="notification error public-exam-notice">{submitError}</div>}
+      {submitError && <ErrorBanner>{submitError}</ErrorBanner>}
 
       {questions.length === 0 && (
-        <div className="public-exam-card">
-          <p className="text-muted">Această evaluare nu conține exerciții.</p>
-        </div>
+        <Card><p className="text-muted-foreground">Această evaluare nu conține exerciții.</p></Card>
       )}
 
+      {/* Questions */}
       {questions.map((q, idx) => {
         const fb = feedbackResults[q.id]
         const isDisabled = !canAnswer || isGenerating || fb || timerBlock
         return (
-          <div className="public-exam-card question-card-public" key={q.id}>
-            <h3>
-              Întrebarea {idx + 1} <span className="question-points">({q.points} pct.)</span>
-            </h3>
-            <p className="question-text">{q.text}</p>
+          <Card key={q.id}>
+            <div className="mb-3 flex items-baseline justify-between">
+              <h3 className="text-sm font-semibold">Întrebarea {idx + 1}</h3>
+              <span className="text-xs text-muted-foreground">({q.points} pct.)</span>
+            </div>
+            <p className="mb-4 text-sm">{q.text}</p>
 
+            {/* Multiple choice */}
             {q.question_type === 'multiple_choice' && q.options && (
-              <div className="question-options">
+              <div className="mb-4 space-y-2">
                 {q.options.map((opt, oi) => (
-                  <label key={oi} className="option-label">
+                  <label
+                    key={oi}
+                    className={`flex cursor-pointer items-center gap-3 rounded-md border p-3 text-sm transition-colors ${
+                      answers[q.id] === opt
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border hover:bg-accent/50'
+                    } ${isDisabled ? 'pointer-events-none opacity-60' : ''}`}
+                  >
                     <input
                       type="radio"
                       name={`pq-${q.id}`}
@@ -516,6 +522,7 @@ export default function PublicExam({ linkId, apiUrl }) {
                       checked={answers[q.id] === opt}
                       disabled={isDisabled}
                       onChange={() => setAnswers((p) => ({ ...p, [q.id]: opt }))}
+                      className="accent-primary"
                     />
                     <span>{opt}</span>
                   </label>
@@ -523,13 +530,19 @@ export default function PublicExam({ linkId, apiUrl }) {
               </div>
             )}
 
+            {/* Checkboxes */}
             {q.question_type === 'checkboxes' && q.options && (
-              <div className="question-options">
+              <div className="mb-4 space-y-2">
                 {q.options.map((opt, oi) => {
                   const selected = (answers[q.id] || '').split('||')
                   const isChecked = selected.includes(opt)
                   return (
-                    <label key={oi} className="option-label">
+                    <label
+                      key={oi}
+                      className={`flex cursor-pointer items-center gap-3 rounded-md border p-3 text-sm transition-colors ${
+                        isChecked ? 'border-primary bg-primary/5' : 'border-border hover:bg-accent/50'
+                      } ${isDisabled ? 'pointer-events-none opacity-60' : ''}`}
+                    >
                       <input
                         type="checkbox"
                         checked={isChecked}
@@ -540,6 +553,7 @@ export default function PublicExam({ linkId, apiUrl }) {
                             : [...selected.filter(Boolean), opt]
                           setAnswers((p) => ({ ...p, [q.id]: next.join('||') }))
                         }}
+                        className="accent-primary"
                       />
                       <span>{opt}</span>
                     </label>
@@ -548,10 +562,11 @@ export default function PublicExam({ linkId, apiUrl }) {
               </div>
             )}
 
+            {/* Short answer */}
             {q.question_type === 'short_answer' && (
               <input
                 type="text"
-                className="question-input"
+                className={`mb-4 ${inputCls}`}
                 value={answers[q.id] || ''}
                 disabled={isDisabled}
                 onChange={(e) => setAnswers((p) => ({ ...p, [q.id]: e.target.value }))}
@@ -559,9 +574,10 @@ export default function PublicExam({ linkId, apiUrl }) {
               />
             )}
 
+            {/* Long answer */}
             {(q.question_type === 'long_answer' || !q.question_type) && (
               <textarea
-                className="question-textarea"
+                className={`mb-4 min-h-[120px] ${inputCls}`}
                 rows={5}
                 value={answers[q.id] || ''}
                 disabled={isDisabled}
@@ -570,37 +586,41 @@ export default function PublicExam({ linkId, apiUrl }) {
               />
             )}
 
+            {/* Feedback display */}
             {fb && (
-              <div className="feedback-box">
-                {fb.score != null && <p className="score-line">Scor: {fb.score}</p>}
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
+                {fb.score != null && (
+                  <p className="mb-2 text-sm font-semibold">
+                    Scor: <span className="text-primary">{fb.score}</span>
+                  </p>
+                )}
                 {fb.feedback?.map((item, i) => (
-                  <div key={i} className="feedback-item">
-                    <strong>{item.category}</strong>
-                    <p>{item.message}</p>
+                  <div key={i} className="mt-2 text-sm">
+                    <strong className="text-xs uppercase text-muted-foreground">{item.category}</strong>
+                    <p className="mt-0.5">{item.message}</p>
                   </div>
                 ))}
               </div>
             )}
 
+            {/* Submit button */}
             {!fb && (
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={isDisabled}
-                onClick={() => handleSubmitAnswer(q.id, answers[q.id])}
-              >
+              <PrimaryBtn disabled={isDisabled} onClick={() => handleSubmitAnswer(q.id, answers[q.id])}>
                 {isGenerating ? (
                   'Se procesează...'
                 ) : (
                   <>
-                    <Icons.Send /> Trimite răspunsul
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
+                      <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                    </svg>
+                    Trimite răspunsul
                   </>
                 )}
-              </button>
+              </PrimaryBtn>
             )}
-          </div>
+          </Card>
         )
       })}
-    </div>
+    </PageShell>
   )
 }
