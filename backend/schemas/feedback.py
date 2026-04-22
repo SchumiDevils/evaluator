@@ -28,6 +28,7 @@ class ResponseRead(BaseModel):
     id: int
     answer_text: str
     evaluation_id: Optional[int]
+    variant_id: Optional[int] = None
     question_id: Optional[int]
     score: Optional[int]
     mode: str

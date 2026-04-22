@@ -13,6 +13,9 @@ class Question(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     evaluation_id: Mapped[int] = mapped_column(ForeignKey("evaluations.id", ondelete="CASCADE"), nullable=False)
+    variant_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("evaluation_variants.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     order: Mapped[int] = mapped_column(Integer, default=0)
     question_type: Mapped[str] = mapped_column(String(30), default="long_answer")
     text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -21,6 +24,8 @@ class Question(TimestampMixin, Base):
     points: Mapped[int] = mapped_column(Integer, default=10)
 
     evaluation: Mapped["Evaluation"] = relationship(back_populates="questions")
+    variant: Mapped[Optional["EvaluationVariant"]] = relationship(back_populates="questions")
 
 
 from .evaluation import Evaluation  # noqa: E402
+from .evaluation_variant import EvaluationVariant  # noqa: E402

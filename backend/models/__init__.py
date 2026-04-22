@@ -2,6 +2,7 @@ from .base import Base
 from .attempt import EvaluationAttempt
 from .enrollment import EvaluationEnrollment
 from .evaluation import Evaluation
+from .evaluation_variant import EvaluationVariant
 from .feedback import Feedback
 from .public_attempt import PublicEvaluationAttempt
 from .question import Question
@@ -16,6 +17,7 @@ __all__ = [
     "Evaluation",
     "EvaluationAttempt",
     "EvaluationEnrollment",
+    "EvaluationVariant",
     "PublicEvaluationAttempt",
     "Question",
     "Response",

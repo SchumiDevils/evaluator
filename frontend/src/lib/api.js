@@ -103,6 +103,23 @@ export const evaluations = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     }),
+  listVariants: (evalId) => apiFetch(`/evaluations/${evalId}/variants`),
+  getVariant: (evalId, variantId) =>
+    apiFetch(`/evaluations/${evalId}/variants/${variantId}`),
+  createVariant: (evalId, data) =>
+    apiFetch(`/evaluations/${evalId}/variants`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  updateVariant: (evalId, variantId, data) =>
+    apiFetch(`/evaluations/${evalId}/variants/${variantId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  deleteVariant: (evalId, variantId) =>
+    apiFetch(`/evaluations/${evalId}/variants/${variantId}`, { method: 'DELETE' }),
 }
 
 export const feedback = {

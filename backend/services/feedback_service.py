@@ -96,6 +96,7 @@ async def generate_and_store_feedback(
     response = Response(
         answer_text=answer,
         evaluation_id=evaluation_id,
+        variant_id=(question.variant_id if question is not None else None),
         question_id=question_id,
         user_id=user.id if user else None,
         guest_name=guest_name,

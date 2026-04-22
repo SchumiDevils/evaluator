@@ -75,6 +75,42 @@ def _sync_migrate(sync_conn: Any) -> None:
         if "avatar_content" not in user_cols:
             sync_conn.execute(text("ALTER TABLE users ADD COLUMN avatar_content BLOB"))
 
+    # evaluation_variants: creat deja de create_all dacă nu există.
+    if insp.has_table("questions"):
+        q_cols = {c["name"] for c in insp.get_columns("questions")}
+        if "variant_id" not in q_cols:
+            sync_conn.execute(text("ALTER TABLE questions ADD COLUMN variant_id INTEGER"))
+            sync_conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_questions_variant_id ON questions (variant_id)")
+            )
+    if insp.has_table("responses"):
+        resp_cols2 = {c["name"] for c in insp.get_columns("responses")}
+        if "variant_id" not in resp_cols2:
+            sync_conn.execute(text("ALTER TABLE responses ADD COLUMN variant_id INTEGER"))
+            sync_conn.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_responses_variant_id ON responses (variant_id)")
+            )
+    if insp.has_table("evaluation_attempts"):
+        att_cols = {c["name"] for c in insp.get_columns("evaluation_attempts")}
+        if "variant_id" not in att_cols:
+            sync_conn.execute(text("ALTER TABLE evaluation_attempts ADD COLUMN variant_id INTEGER"))
+            sync_conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_evaluation_attempts_variant_id ON evaluation_attempts (variant_id)"
+                )
+            )
+    if insp.has_table("public_evaluation_attempts"):
+        patt_cols = {c["name"] for c in insp.get_columns("public_evaluation_attempts")}
+        if "variant_id" not in patt_cols:
+            sync_conn.execute(
+                text("ALTER TABLE public_evaluation_attempts ADD COLUMN variant_id INTEGER")
+            )
+            sync_conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_public_evaluation_attempts_variant_id ON public_evaluation_attempts (variant_id)"
+                )
+            )
+
 
 async def run_schema_migrations(conn: AsyncConnection) -> None:
     await conn.run_sync(_sync_migrate)
@@ -106,6 +142,64 @@ async def backfill_evaluation_access_and_enrollments(session: Any) -> None:
                 break
             code = generate_access_code()
         ev.access_code = code
+    await session.flush()
+
+    await _backfill_variants(session)
+
+
+async def _backfill_variants(session: Any) -> None:
+    """Creează câte o 'Varianta 1' per evaluare care n-are încă variante
+    și migrează întrebările + răspunsurile + attempturile existente în ea."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    assert isinstance(session, AsyncSession)
+
+    result = await session.execute(
+        text(
+            """
+            SELECT e.id FROM evaluations e
+            WHERE NOT EXISTS (
+                SELECT 1 FROM evaluation_variants v WHERE v.evaluation_id = e.id
+            )
+            """
+        )
+    )
+    eval_ids = [row[0] for row in result.all()]
+    for eid in eval_ids:
+        ins = await session.execute(
+            text(
+                """
+                INSERT INTO evaluation_variants (evaluation_id, "order", name, created_at, updated_at)
+                VALUES (:eid, 0, 'Varianta 1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """
+            ),
+            {"eid": eid},
+        )
+        variant_id = ins.lastrowid
+        await session.execute(
+            text(
+                "UPDATE questions SET variant_id = :vid WHERE evaluation_id = :eid AND variant_id IS NULL"
+            ),
+            {"vid": variant_id, "eid": eid},
+        )
+        await session.execute(
+            text(
+                "UPDATE responses SET variant_id = :vid WHERE evaluation_id = :eid AND variant_id IS NULL"
+            ),
+            {"vid": variant_id, "eid": eid},
+        )
+        await session.execute(
+            text(
+                "UPDATE evaluation_attempts SET variant_id = :vid WHERE evaluation_id = :eid AND variant_id IS NULL"
+            ),
+            {"vid": variant_id, "eid": eid},
+        )
+        await session.execute(
+            text(
+                "UPDATE public_evaluation_attempts SET variant_id = :vid WHERE evaluation_id = :eid AND variant_id IS NULL"
+            ),
+            {"vid": variant_id, "eid": eid},
+        )
     await session.flush()
 
 

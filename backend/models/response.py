@@ -24,6 +24,9 @@ class Response(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     answer_text: Mapped[str] = mapped_column(Text, nullable=False)
     evaluation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("evaluations.id", ondelete="SET NULL"))
+    variant_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("evaluation_variants.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     question_id: Mapped[Optional[int]] = mapped_column(ForeignKey("questions.id", ondelete="SET NULL"))
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     guest_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

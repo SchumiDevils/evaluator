@@ -18,6 +18,9 @@ class EvaluationAttempt(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     evaluation_id: Mapped[int] = mapped_column(ForeignKey("evaluations.id", ondelete="CASCADE"))
+    variant_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("evaluation_variants.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped[Optional["User"]] = relationship()

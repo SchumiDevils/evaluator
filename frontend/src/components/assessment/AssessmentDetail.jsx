@@ -58,6 +58,10 @@ export default function AssessmentDetail() {
   const [reevalForm, setReevalForm] = useState({})
   const [evalAnalytics, setEvalAnalytics] = useState(null)
   const [isExportingPdf, setIsExportingPdf] = useState(false)
+  const [viewVariantId, setViewVariantId] = useState(null)
+  const [variantQuestionsById, setVariantQuestionsById] = useState({})
+  const [responsesVariantFilter, setResponsesVariantFilter] = useState('all')
+  const [analyticsVariantFilter, setAnalyticsVariantFilter] = useState('all')
 
   const [timeRemaining, setTimeRemaining] = useState(null)
   const [timerExpired, setTimerExpired] = useState(false)
@@ -96,9 +100,15 @@ export default function AssessmentDetail() {
         try {
           const res = await evalApi.start(latest.id)
           if (res.ok) {
-            const { seconds_remaining } = await res.json()
+            const startData = await res.json()
+            const { seconds_remaining, variant_id } = startData
             setTimeRemaining(seconds_remaining <= 0 ? 0 : seconds_remaining)
             setTimerExpired(seconds_remaining <= 0)
+            // Reîncarcă evaluarea pentru a obține întrebările variantei atribuite.
+            if (variant_id && latest.requires_start) {
+              const reloaded = await loadAssessment()
+              if (reloaded) Object.assign(latest, reloaded)
+            }
           }
         } catch { /* ignore */ }
         autoSubmitRef.current = false
@@ -133,6 +143,44 @@ export default function AssessmentDetail() {
       fetchStudentResponses()
     }
   }, [isOwner, assessment?.id])
+
+  useEffect(() => {
+    if (!isOwner || !assessment?.variants?.length) return
+    if (viewVariantId && assessment.variants.some((v) => v.id === viewVariantId)) return
+    setViewVariantId(assessment.variants[0].id)
+  }, [isOwner, assessment?.id, assessment?.variants])
+
+  useEffect(() => {
+    if (!isOwner || !viewVariantId || !assessment?.id) return
+    if (variantQuestionsById[viewVariantId]) return
+    ;(async () => {
+      try {
+        const res = await evalApi.getVariant(assessment.id, viewVariantId)
+        if (res.ok) {
+          const data = await res.json()
+          setVariantQuestionsById((p) => ({ ...p, [viewVariantId]: data.questions || [] }))
+        }
+      } catch { /* ignore */ }
+    })()
+  }, [isOwner, viewVariantId, assessment?.id, variantQuestionsById])
+
+  // Prefetch toate variantele pentru owner (pentru tab-urile Răspunsuri și Analiză).
+  useEffect(() => {
+    if (!isOwner || !assessment?.variants?.length) return
+    const missing = assessment.variants.filter((v) => !variantQuestionsById[v.id])
+    if (!missing.length) return
+    ;(async () => {
+      for (const v of missing) {
+        try {
+          const res = await evalApi.getVariant(assessment.id, v.id)
+          if (res.ok) {
+            const data = await res.json()
+            setVariantQuestionsById((p) => ({ ...p, [v.id]: data.questions || [] }))
+          }
+        } catch { /* ignore */ }
+      }
+    })()
+  }, [isOwner, assessment?.id, assessment?.variants, variantQuestionsById])
 
   useEffect(() => {
     if (timeRemaining === null || timerExpired) return
@@ -282,14 +330,24 @@ export default function AssessmentDetail() {
   const gateLabel = gateSecondsLeft != null ? formatSecondsCountdown(gateSecondsLeft) : formatCountdownToStart(startIso)
   const statusBadge = unifiedEvalStatusBadge(assessment)
 
-  const groupedByStudent = studentResponses.reduce((acc, r) => {
+  const filteredResponses =
+    responsesVariantFilter === 'all'
+      ? studentResponses
+      : studentResponses.filter((r) => String(r.variant_id) === responsesVariantFilter)
+
+  const groupedByStudent = filteredResponses.reduce((acc, r) => {
     const key = r.user_id != null ? `u-${r.user_id}` : `g-${(r.guest_name || '').trim()}|${(r.guest_class || '').trim()}`
     if (!acc[key]) acc[key] = { name: r.user_name || r.guest_name || 'Participant', responses: [] }
     acc[key].responses.push(r)
     return acc
   }, {})
 
-  const questionsMap = (assessment.questions || []).reduce((m, q) => { m[q.id] = q; return m }, {})
+  const questionsMap = {}
+  for (const q of assessment.questions || []) questionsMap[q.id] = q
+  for (const qs of Object.values(variantQuestionsById)) {
+    for (const q of qs || []) questionsMap[q.id] = q
+  }
+  const variantNameById = (assessment.variants || []).reduce((m, v) => { m[v.id] = v.name; return m }, {})
 
   return (
     <>
@@ -452,29 +510,69 @@ export default function AssessmentDetail() {
                   </form>
                 ) : !isOwner && !scheduleBlocked ? null : isOwner ? (
                   <div className="space-y-4">
-                    {(assessment.questions || []).length === 0 ? (
-                      <Card><CardContent className="p-6 text-center text-muted-foreground">Niciun exercițiu.</CardContent></Card>
-                    ) : (assessment.questions || []).map((q, idx) => (
-                      <Card key={q.id}>
-                        <CardHeader className="pb-3">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-semibold text-primary">Exercițiul {idx + 1}</span>
-                            <Badge variant="secondary">{q.points} puncte</Badge>
-                          </div>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                          <p>{q.text}</p>
-                          {q.options && (
-                            <div className="space-y-1 text-sm text-muted-foreground">
-                              {q.options.map((opt, oi) => <div key={oi}>{q.question_type === 'multiple_choice' ? '○' : '☐'} {opt}</div>)}
-                            </div>
-                          )}
-                          {q.correct_answer && (
-                            <div className="mt-2 rounded-md bg-green-500/10 px-3 py-2 text-sm text-green-500">Răspuns corect: <strong>{q.correct_answer}</strong></div>
-                          )}
+                    {(assessment.variants || []).length === 0 ? (
+                      <Card>
+                        <CardContent className="p-8 text-center space-y-3 text-muted-foreground">
+                          <p>Nicio variantă configurată.</p>
+                          <Button variant="outline" size="sm" onClick={() => navigate(`/assessment/${assessment.id}/edit`, { state: { assessment } })}>
+                            Editează evaluarea pentru a adăuga variante
+                          </Button>
                         </CardContent>
                       </Card>
-                    ))}
+                    ) : (
+                      <>
+                        {(assessment.variants || []).length > 1 && (
+                          <div className="flex flex-wrap gap-2">
+                            {(assessment.variants || []).map((v) => (
+                              <Button
+                                key={v.id}
+                                type="button"
+                                variant={viewVariantId === v.id ? 'default' : 'outline'}
+                                size="sm"
+                                onClick={() => setViewVariantId(v.id)}
+                              >
+                                {v.name} ({v.question_count})
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+                        {(() => {
+                          if (!viewVariantId) return null
+                          if (!(viewVariantId in variantQuestionsById)) {
+                            return (
+                              <Card><CardContent className="p-6 text-center text-muted-foreground">Se încarcă...</CardContent></Card>
+                            )
+                          }
+                          const qs = variantQuestionsById[viewVariantId] || []
+                          if (qs.length === 0) {
+                            return (
+                              <Card><CardContent className="p-6 text-center text-muted-foreground">Nicio întrebare în această variantă.</CardContent></Card>
+                            )
+                          }
+                          return qs.map((q, idx) => (
+                            <Card key={q.id}>
+                              <CardHeader className="pb-3">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-sm font-semibold text-primary">Exercițiul {idx + 1}</span>
+                                  <Badge variant="secondary">{q.points} puncte</Badge>
+                                </div>
+                              </CardHeader>
+                              <CardContent className="space-y-2">
+                                <p>{q.text}</p>
+                                {q.options && (
+                                  <div className="space-y-1 text-sm text-muted-foreground">
+                                    {q.options.map((opt, oi) => <div key={oi}>{q.question_type === 'multiple_choice' ? '○' : '☐'} {opt}</div>)}
+                                  </div>
+                                )}
+                                {q.correct_answer && (
+                                  <div className="mt-2 rounded-md bg-green-500/10 px-3 py-2 text-sm text-green-500">Răspuns corect: <strong>{q.correct_answer}</strong></div>
+                                )}
+                              </CardContent>
+                            </Card>
+                          ))
+                        })()}
+                      </>
+                    )}
                   </div>
                 ) : null}
               </>
@@ -482,7 +580,21 @@ export default function AssessmentDetail() {
 
             {detailTab === 'responses' && isOwner && (
               <div className="space-y-4">
-                <div className="flex justify-end">
+                <div className="flex items-center justify-between gap-2">
+                  {(assessment.variants || []).length > 1 ? (
+                    <select
+                      value={responsesVariantFilter}
+                      onChange={(e) => setResponsesVariantFilter(e.target.value)}
+                      className="h-8 rounded-md border bg-background px-2 text-sm"
+                    >
+                      <option value="all">Toate variantele</option>
+                      {(assessment.variants || []).map((v) => (
+                        <option key={v.id} value={String(v.id)}>{v.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span />
+                  )}
                   <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={isExportingPdf}>
                     <Download className="mr-1.5 h-3.5 w-3.5" />
                     {isExportingPdf ? 'Se generează...' : 'Exportă PDF'}
@@ -494,11 +606,16 @@ export default function AssessmentDetail() {
                   const isExpanded = !!expandedStudents[key]
                   const totalScore = responses.reduce((s, r) => s + (r.score ?? 0), 0)
                   const maxScore = responses.reduce((s, r) => s + (questionsMap[r.question_id]?.points ?? 0), 0)
+                  const variantIds = Array.from(new Set(responses.map((r) => r.variant_id).filter(Boolean)))
+                  const variantsLabel = variantIds.map((vid) => variantNameById[vid]).filter(Boolean).join(', ')
                   return (
                     <Card key={key}>
                       <div className="flex cursor-pointer items-center gap-3 p-4" onClick={() => setExpandedStudents((p) => ({ ...p, [key]: !p[key] }))}>
                         <Users className="h-5 w-5 text-primary" />
-                        <h3 className="flex-1 font-semibold">{name}</h3>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="truncate font-semibold">{name}</h3>
+                          {variantsLabel && <p className="text-xs text-muted-foreground">{variantsLabel}</p>}
+                        </div>
                         <Badge variant="secondary">{responses.length} răspunsuri</Badge>
                         {maxScore > 0 && <Badge variant="outline">{totalScore}/{maxScore} pct</Badge>}
                         <ChevronRight className={`h-4 w-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
@@ -507,11 +624,15 @@ export default function AssessmentDetail() {
                         <div className="divide-y border-t">
                           {responses.map((r) => {
                             const q = questionsMap[r.question_id]
+                            const variantQs = r.variant_id ? variantQuestionsById[r.variant_id] || [] : []
+                            const exIdx = q ? variantQs.findIndex((x) => x.id === q.id) : -1
+                            const variantLabel = r.variant_id ? variantNameById[r.variant_id] : null
                             return (
                               <div key={r.id} className="p-4 space-y-2">
                                 <div className="flex items-baseline gap-2 text-sm">
-                                  <span className="font-semibold text-primary uppercase text-xs">{q ? `Ex. ${(assessment.questions || []).indexOf(q) + 1}` : '#?'}</span>
+                                  <span className="font-semibold text-primary uppercase text-xs">{exIdx >= 0 ? `Ex. ${exIdx + 1}` : '#?'}</span>
                                   <span className="text-muted-foreground">{q?.text || 'Necunoscută'}</span>
+                                  {variantLabel && <Badge variant="outline" className="ml-auto text-[10px]">{variantLabel}</Badge>}
                                 </div>
                                 <div className="rounded-md bg-primary/5 border border-primary/10 p-2 text-sm">{r.answer_text}</div>
                                 {r.score != null && <p className="text-sm">Scor: <strong className="text-primary">{r.score}/{q?.points || '?'}</strong></p>}
@@ -548,20 +669,42 @@ export default function AssessmentDetail() {
               </div>
             )}
 
-            {detailTab === 'analytics' && isOwner && (
+            {detailTab === 'analytics' && isOwner && (() => {
+              const activeAnalytics = (() => {
+                if (!evalAnalytics) return null
+                if (analyticsVariantFilter === 'all') return evalAnalytics
+                const match = (evalAnalytics.per_variant || []).find((pv) => String(pv.variant_id) === analyticsVariantFilter)
+                return match ? { ...match, per_variant: [] } : evalAnalytics
+              })()
+              return (
               <div className="space-y-4">
-                {!evalAnalytics ? (
+                {(assessment.variants || []).length > 1 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Vizualizare:</span>
+                    <select
+                      value={analyticsVariantFilter}
+                      onChange={(e) => setAnalyticsVariantFilter(e.target.value)}
+                      className="h-8 rounded-md border bg-background px-2 text-sm"
+                    >
+                      <option value="all">Toate variantele</option>
+                      {(assessment.variants || []).map((v) => (
+                        <option key={v.id} value={String(v.id)}>{v.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {!activeAnalytics ? (
                   <Card><CardContent className="p-8 text-center text-muted-foreground">Se încarcă...</CardContent></Card>
-                ) : evalAnalytics.summary.total_participants === 0 ? (
+                ) : activeAnalytics.summary.total_participants === 0 ? (
                   <Card><CardContent className="p-8 text-center text-muted-foreground"><BarChart3 className="mx-auto mb-3 h-12 w-12 opacity-50" /><p>Niciun student nu a răspuns.</p></CardContent></Card>
                 ) : (
                   <>
                     <div className="grid grid-cols-2 gap-3">
                       {[
-                        { v: evalAnalytics.summary.total_participants, l: 'Participanți' },
-                        { v: `${evalAnalytics.summary.avg_score_percent}%`, l: 'Media clasei' },
-                        { v: `${evalAnalytics.summary.max_score_percent}%`, l: 'Max scor' },
-                        { v: `${evalAnalytics.summary.min_score_percent}%`, l: 'Min scor' },
+                        { v: activeAnalytics.summary.total_participants, l: 'Participanți' },
+                        { v: `${activeAnalytics.summary.avg_score_percent}%`, l: 'Media clasei' },
+                        { v: `${activeAnalytics.summary.max_score_percent}%`, l: 'Max scor' },
+                        { v: `${activeAnalytics.summary.min_score_percent}%`, l: 'Min scor' },
                       ].map((s, i) => (
                         <Card key={i}><CardContent className="p-4 text-center"><p className="text-2xl font-bold text-primary">{s.v}</p><p className="text-xs text-muted-foreground">{s.l}</p></CardContent></Card>
                       ))}
@@ -570,26 +713,26 @@ export default function AssessmentDetail() {
                       <CardHeader><CardTitle className="text-base">Distribuția Scorurilor</CardTitle></CardHeader>
                       <CardContent>
                         <ResponsiveContainer width="100%" height={300}>
-                          <BarChart data={evalAnalytics.score_distribution}><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="range" fontSize={12} /><YAxis fontSize={12} allowDecimals={false} /><Tooltip {...chartTooltipStyle} /><Bar dataKey="count" name="Studenți" radius={[6,6,0,0]}>{evalAnalytics.score_distribution.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}</Bar></BarChart>
+                          <BarChart data={activeAnalytics.score_distribution}><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis dataKey="range" fontSize={12} /><YAxis fontSize={12} allowDecimals={false} /><Tooltip {...chartTooltipStyle} /><Bar dataKey="count" name="Studenți" radius={[6,6,0,0]}>{activeAnalytics.score_distribution.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}</Bar></BarChart>
                         </ResponsiveContainer>
                       </CardContent>
                     </Card>
-                    {evalAnalytics.question_success.length > 0 && (
+                    {activeAnalytics.question_success.length > 0 && (
                       <Card>
                         <CardHeader><CardTitle className="text-base">Rata de Succes per Întrebare</CardTitle></CardHeader>
                         <CardContent>
-                          <ResponsiveContainer width="100%" height={Math.max(250, evalAnalytics.question_success.length * 50)}>
-                            <BarChart data={evalAnalytics.question_success} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis type="number" domain={[0, 100]} unit="%" fontSize={12} /><YAxis type="category" dataKey="question_text" fontSize={11} width={180} /><Tooltip {...chartTooltipStyle} formatter={(v) => `${v}%`} /><Bar dataKey="avg_percent" name="Media %" radius={[0,6,6,0]}>{evalAnalytics.question_success.map((e, i) => <Cell key={i} fill={e.avg_percent >= 70 ? '#22c55e' : e.avg_percent >= 40 ? '#f59e0b' : '#ef4444'} />)}</Bar></BarChart>
+                          <ResponsiveContainer width="100%" height={Math.max(250, activeAnalytics.question_success.length * 50)}>
+                            <BarChart data={activeAnalytics.question_success} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis type="number" domain={[0, 100]} unit="%" fontSize={12} /><YAxis type="category" dataKey="question_text" fontSize={11} width={180} /><Tooltip {...chartTooltipStyle} formatter={(v) => `${v}%`} /><Bar dataKey="avg_percent" name="Media %" radius={[0,6,6,0]}>{activeAnalytics.question_success.map((e, i) => <Cell key={i} fill={e.avg_percent >= 70 ? '#22c55e' : e.avg_percent >= 40 ? '#f59e0b' : '#ef4444'} />)}</Bar></BarChart>
                           </ResponsiveContainer>
                         </CardContent>
                       </Card>
                     )}
-                    {evalAnalytics.student_scores.length > 0 && (
+                    {activeAnalytics.student_scores.length > 0 && (
                       <Card>
                         <CardHeader><CardTitle className="text-base">Clasament Studenți</CardTitle></CardHeader>
                         <CardContent>
-                          <ResponsiveContainer width="100%" height={Math.max(250, evalAnalytics.student_scores.length * 45)}>
-                            <BarChart data={evalAnalytics.student_scores} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis type="number" domain={[0, 100]} unit="%" fontSize={12} /><YAxis type="category" dataKey="name" fontSize={11} width={150} /><Tooltip {...chartTooltipStyle} formatter={(v, _n, p) => [`${p.payload.total_score}/${p.payload.max_points} (${v}%)`, 'Scor']} /><Bar dataKey="percent" name="Scor %" radius={[0,6,6,0]}>{evalAnalytics.student_scores.map((e, i) => <Cell key={i} fill={e.percent >= 70 ? '#22c55e' : e.percent >= 40 ? '#f59e0b' : '#ef4444'} />)}</Bar></BarChart>
+                          <ResponsiveContainer width="100%" height={Math.max(250, activeAnalytics.student_scores.length * 45)}>
+                            <BarChart data={activeAnalytics.student_scores} layout="vertical"><CartesianGrid strokeDasharray="3 3" stroke="var(--border)" /><XAxis type="number" domain={[0, 100]} unit="%" fontSize={12} /><YAxis type="category" dataKey="name" fontSize={11} width={150} /><Tooltip {...chartTooltipStyle} formatter={(v, _n, p) => [`${p.payload.total_score}/${p.payload.max_points} (${v}%)`, 'Scor']} /><Bar dataKey="percent" name="Scor %" radius={[0,6,6,0]}>{activeAnalytics.student_scores.map((e, i) => <Cell key={i} fill={e.percent >= 70 ? '#22c55e' : e.percent >= 40 ? '#f59e0b' : '#ef4444'} />)}</Bar></BarChart>
                           </ResponsiveContainer>
                         </CardContent>
                       </Card>
@@ -597,7 +740,8 @@ export default function AssessmentDetail() {
                   </>
                 )}
               </div>
-            )}
+              )
+            })()}
           </div>
         </div>
       </main>
