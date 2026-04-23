@@ -11,6 +11,7 @@ import {
   Sun,
   Moon,
   LogOut,
+  Bot,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -38,7 +39,10 @@ export default function LeftSidebar({ mobile = false, onNavigate }) {
   const navItems = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
     ...(isProfessor
-      ? [{ path: '/assessment/new', label: 'Evaluare nouă', icon: PlusCircle }]
+      ? [
+          { path: '/assessment/new', label: 'Evaluare nouă', icon: PlusCircle },
+          { path: '/chat', label: 'Asistent AI', icon: Bot },
+        ]
       : []),
     { path: '/analytics', label: 'Analize', icon: BarChart3 },
     ...(!isProfessor

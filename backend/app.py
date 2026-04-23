@@ -9,7 +9,7 @@ from .core.http_middleware import CORSHeadersFixMiddleware
 from .db.migrate import backfill_evaluation_access_and_enrollments, run_schema_migrations
 from .db.session import async_session_maker, engine
 from .models import Base  # noqa: F401 — triggers model registration
-from .routers import analytics, auth, evaluations, feedback
+from .routers import analytics, auth, chat, evaluations, feedback
 
 settings = get_settings()
 
@@ -49,3 +49,4 @@ app.include_router(auth.router, prefix=settings.api_v1_prefix)
 app.include_router(evaluations.router, prefix=settings.api_v1_prefix)
 app.include_router(feedback.router, prefix=settings.api_v1_prefix)
 app.include_router(analytics.router, prefix=settings.api_v1_prefix)
+app.include_router(chat.router, prefix=settings.api_v1_prefix)

@@ -134,3 +134,12 @@ export const feedback = {
 export const analytics = {
   global: () => apiFetch('/analytics/'),
 }
+
+export const chat = {
+  sendMessage: (messages) =>
+    apiFetchJson('/chat/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages }),
+    }),
+}
