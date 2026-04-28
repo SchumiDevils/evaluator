@@ -422,6 +422,25 @@ export default function AuthPage() {
                         </div>
                         {authError && <FE>{authError}</FE>}
                         <FB disabled={isLoading}>{isLoading ? 'Se procesează...' : 'Intră în cont'}</FB>
+                        <p className="mt-1 text-center font-mono text-[9px] leading-snug opacity-60" style={{ color: textMuted }}>
+                          <a
+                            href="https://drive.google.com/drive/folders/1-Dp8ouWQTaciF0wYYXxBx0NJqzU0WVfi?usp=sharing"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline underline-offset-1 hover:opacity-100"
+                          >
+                            Drive
+                          </a>
+                          <span aria-hidden> · </span>
+                          <a
+                            href="https://drive.google.com/drive/folders/1rda-CPkGRp9eu_5kv0OB6uKBo6lwArIc?usp=drive_link"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline underline-offset-1 hover:opacity-100"
+                          >
+                            Drive 2
+                          </a>
+                        </p>
                       </form>
                     )}
                   </>
