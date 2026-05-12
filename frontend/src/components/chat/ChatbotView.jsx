@@ -139,9 +139,9 @@ export default function ChatbotView() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="flex-1 overflow-y-auto px-4 py-3">
           {messages.length === 0 ? (
-            <div className="flex flex-col items-center gap-6 pt-8 text-center">
+            <div className="flex flex-col items-center gap-4 pt-4 text-center">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
                 <Bot className="h-8 w-8 text-primary" />
               </div>
@@ -206,7 +206,7 @@ export default function ChatbotView() {
               )}
             </Button>
           </div>
-          <p className="mt-1.5 text-center text-[11px] text-muted-foreground">
+          <p className="mt-1 text-center text-[10px] text-muted-foreground">
             AI poate face greșeli. Verifică informațiile importante.
           </p>
         </div>
