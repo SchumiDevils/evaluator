@@ -91,12 +91,12 @@ export default function DashboardView() {
         { label: 'Total evaluări', value: stats.total, icon: FileText, color: 'text-blue-500' },
         { label: 'Active', value: stats.active, icon: Clock, color: 'text-green-500' },
         { label: 'Total răspunsuri', value: stats.responses, icon: Users, color: 'text-orange-500' },
-        { label: 'Scor mediu', value: `${stats.avgScore}%`, icon: TrendingUp, color: 'text-pink-500' },
+        { label: 'Scor mediu', value: `${stats.avgScore}%`, icon: TrendingUp, color: 'text-orange-500' },
       ]
     : [
         { label: 'Evaluări disponibile', value: stats.total, icon: FileText, color: 'text-blue-500' },
         { label: 'Răspunsurile tale', value: stats.responses, icon: TrendingUp, color: 'text-green-500', onClick: () => navigate('/my-responses') },
-        { label: 'Scor mediu', value: `${stats.avgScore}%`, icon: TrendingUp, color: 'text-pink-500' },
+        { label: 'Scor mediu', value: `${stats.avgScore}%`, icon: TrendingUp, color: 'text-orange-500' },
       ]
 
   return (
