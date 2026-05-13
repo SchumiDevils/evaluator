@@ -147,7 +147,7 @@ export default function DashboardView() {
                 return (
                   <div
                     key={assessment.id}
-                    className="cursor-pointer px-4 py-4 transition-colors hover:bg-accent/50"
+                    className="cursor-pointer px-4 py-4 transition-colors hover:bg-muted/40"
                     onClick={() => navigate(`/assessment/${assessment.id}`, { state: { assessment } })}
                   >
                     <div className="flex items-start gap-3">
