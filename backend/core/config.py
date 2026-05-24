@@ -17,6 +17,16 @@ class Settings(BaseSettings):
         description="SQLAlchemy compatible URL. Use async driver.",
     )
 
+    @property
+    def effective_database_url(self) -> str:
+        """Convert Heroku-style postgres:// to async-compatible postgresql+asyncpg://."""
+        url = self.database_url
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return url
+
     secret_key: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
     access_token_expire_minutes: int = 60
     jwt_algorithm: str = "HS256"
