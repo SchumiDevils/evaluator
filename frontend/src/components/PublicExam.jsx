@@ -34,6 +34,49 @@ function formatSecondsCountdown(totalSec) {
   return `${sec} s`
 }
 
+const PageShell = ({ children }) => (
+  <div className="min-h-screen bg-background text-foreground">
+    <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
+      {children}
+    </div>
+  </div>
+)
+
+const Card = ({ children, className = '' }) => (
+  <div className={`rounded-lg border border-border bg-card p-6 shadow-sm ${className}`}>
+    {children}
+  </div>
+)
+
+const ErrorBanner = ({ children }) => (
+  <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+    {children}
+  </div>
+)
+
+const PrimaryBtn = ({ children, disabled, onClick, className = '' }) => (
+  <button
+    type="button"
+    disabled={disabled}
+    onClick={onClick}
+    className={`inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50 ${className}`}
+  >
+    {children}
+  </button>
+)
+
+const SecondaryBtn = ({ children, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
+  >
+    {children}
+  </button>
+)
+
+const inputCls = 'w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2 disabled:opacity-50'
+
 export default function PublicExam({ linkId, apiUrl }) {
   const [evalData, setEvalData] = useState(null)
   const [loadError, setLoadError] = useState('')
@@ -238,50 +281,6 @@ export default function PublicExam({ linkId, apiUrl }) {
       setIsGenerating(false)
     }
   }
-
-  /* ── Wrapper helpers ── */
-  const PageShell = ({ children }) => (
-    <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
-        {children}
-      </div>
-    </div>
-  )
-
-  const Card = ({ children, className = '' }) => (
-    <div className={`rounded-lg border border-border bg-card p-6 shadow-sm ${className}`}>
-      {children}
-    </div>
-  )
-
-  const ErrorBanner = ({ children }) => (
-    <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
-      {children}
-    </div>
-  )
-
-  const PrimaryBtn = ({ children, disabled, onClick, className = '' }) => (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className={`inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50 ${className}`}
-    >
-      {children}
-    </button>
-  )
-
-  const SecondaryBtn = ({ children, onClick }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-4 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
-    >
-      {children}
-    </button>
-  )
-
-  const inputCls = 'w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none ring-ring focus:ring-2 disabled:opacity-50'
 
   /* ── Error / Loading states ── */
   if (loadError) {

@@ -8,9 +8,9 @@ export function AppProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem('auth_token') ?? '')
   const [user, setUser] = useState(null)
   const [theme, setTheme] = useState(() =>
-    typeof localStorage !== 'undefined' && localStorage.getItem('rubrix-theme') === 'light'
-      ? 'light'
-      : 'dark'
+    typeof localStorage !== 'undefined' && localStorage.getItem('rubrix-theme') === 'dark'
+      ? 'dark'
+      : 'light'
   )
   const [avatarUrl, setAvatarUrl] = useState(null)
 
@@ -27,11 +27,11 @@ export function AppProvider({ children }) {
     if (theme === 'dark') {
       root.classList.add('dark')
       root.classList.remove('light')
-      localStorage.removeItem('rubrix-theme')
+      localStorage.setItem('rubrix-theme', 'dark')
     } else {
       root.classList.remove('dark')
       root.classList.add('light')
-      localStorage.setItem('rubrix-theme', 'light')
+      localStorage.removeItem('rubrix-theme')
     }
   }, [theme])
 
