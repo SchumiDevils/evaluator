@@ -106,8 +106,8 @@ export default function VariantEditor({ initialVariant, onSave, onCancel, saveLa
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="space-y-4 overflow-y-auto px-1 pb-2">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1 pb-2">
         <div className="space-y-2">
           <Label>Nume variantă</Label>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="ex: Varianta A" />

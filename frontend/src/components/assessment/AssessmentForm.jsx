@@ -502,7 +502,7 @@ export default function AssessmentForm() {
           }
         }}
       >
-        <DialogContent className="flex max-h-[85vh] w-[min(95vw,720px)] max-w-[95vw] flex-col sm:max-w-[720px]">
+        <DialogContent className="flex max-h-[85vh] w-[min(95vw,720px)] max-w-[95vw] flex-col overflow-hidden sm:max-w-[720px]">
           <DialogHeader>
             <DialogTitle>
               {editorVariant?.name
