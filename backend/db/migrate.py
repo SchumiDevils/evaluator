@@ -1,4 +1,4 @@
-"""SQLite column / data migrations after create_all."""
+"""Schema migrations — compatible with both SQLite and PostgreSQL."""
 
 from __future__ import annotations
 
@@ -45,11 +45,13 @@ def _sync_migrate(sync_conn: Any) -> None:
                 )
             )
     if not insp.has_table("public_evaluation_attempts"):
+        is_sqlite = sync_conn.engine.dialect.name == "sqlite"
+        pk = "INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT" if is_sqlite else "SERIAL PRIMARY KEY"
         sync_conn.execute(
             text(
-                """
+                f"""
                 CREATE TABLE public_evaluation_attempts (
-                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    id {pk},
                     evaluation_id INTEGER NOT NULL,
                     public_link_id VARCHAR(36) NOT NULL,
                     session_token VARCHAR(36) NOT NULL,
@@ -73,7 +75,8 @@ def _sync_migrate(sync_conn: Any) -> None:
         if "avatar_mime" not in user_cols:
             sync_conn.execute(text("ALTER TABLE users ADD COLUMN avatar_mime VARCHAR(64)"))
         if "avatar_content" not in user_cols:
-            sync_conn.execute(text("ALTER TABLE users ADD COLUMN avatar_content BLOB"))
+            blob_type = "BLOB" if sync_conn.engine.dialect.name == "sqlite" else "BYTEA"
+            sync_conn.execute(text(f"ALTER TABLE users ADD COLUMN avatar_content {blob_type}"))
 
     # evaluation_variants: creat deja de create_all dacă nu există.
     if insp.has_table("questions"):
@@ -126,9 +129,10 @@ async def backfill_evaluation_access_and_enrollments(session: Any) -> None:
     await session.execute(
         text(
             """
-            INSERT OR IGNORE INTO evaluation_enrollments (user_id, evaluation_id)
+            INSERT INTO evaluation_enrollments (user_id, evaluation_id)
             SELECT DISTINCT user_id, evaluation_id FROM responses
             WHERE user_id IS NOT NULL AND evaluation_id IS NOT NULL
+            ON CONFLICT DO NOTHING
             """
         )
     )
@@ -171,11 +175,12 @@ async def _backfill_variants(session: Any) -> None:
                 """
                 INSERT INTO evaluation_variants (evaluation_id, "order", name, created_at, updated_at)
                 VALUES (:eid, 0, 'Varianta 1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING id
                 """
             ),
             {"eid": eid},
         )
-        variant_id = ins.lastrowid
+        variant_id = ins.scalar_one()
         await session.execute(
             text(
                 "UPDATE questions SET variant_id = :vid WHERE evaluation_id = :eid AND variant_id IS NULL"
