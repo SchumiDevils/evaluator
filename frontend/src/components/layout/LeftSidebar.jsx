@@ -75,7 +75,7 @@ export default function LeftSidebar({ mobile = false, onNavigate }) {
         <img
           src={rubrixLogo}
           alt="Rubrix"
-          className="h-9 w-9 flex-shrink-0"
+          className="h-14 w-14 flex-shrink-0"
           style={theme === 'dark' ? {
             filter: 'brightness(0) saturate(100%) invert(30%) sepia(90%) saturate(2500%) hue-rotate(320deg) brightness(90%) contrast(100%)',
           } : undefined}
