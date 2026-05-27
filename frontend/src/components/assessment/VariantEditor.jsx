@@ -13,7 +13,13 @@ const normalizeQuestions = (questions) =>
     ...q,
     _key: q._key || q.id || newKey(),
     options: q.options || null,
-    correct_answer: q.correct_answer || '',
+    correct_answer: Array.isArray(q.correct_answer)
+      ? q.correct_answer.join('||')
+      : typeof q.correct_answer === 'string'
+        ? q.correct_answer
+        : q.correct_answer != null
+          ? String(q.correct_answer)
+          : '',
   }))
 
 export default function VariantEditor({ initialVariant, onSave, onCancel, saveLabel = 'Salvează varianta' }) {
