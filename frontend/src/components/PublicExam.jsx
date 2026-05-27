@@ -232,53 +232,67 @@ export default function PublicExam({ linkId, apiUrl }) {
     return () => clearInterval(id)
   }, [sessionReady, timerExpired])
 
-  const handleSubmitAnswer = async (questionId, answerText) => {
-    if (feedbackResults[questionId]) return
+  const [submitted, setSubmitted] = useState(false)
+
+  const handleSubmitAll = async () => {
     const name = guestName.trim()
     if (!name) { setSubmitError('Introdu numele înainte de a trimite.'); return }
-    if (!answerText?.trim()) { setSubmitError('Introdu un răspuns.'); return }
     if (!sessionToken || timerExpired || (timeRemaining != null && timeRemaining <= 0)) {
       setSubmitError('Timpul a expirat; nu mai poți trimite răspunsuri.')
       return
     }
+    const questionsToSubmit = (sessionQuestions ?? []).filter(
+      (q) => (answers[q.id] || '').trim() && !feedbackResults[q.id]
+    )
+    if (questionsToSubmit.length === 0) {
+      setSubmitError('Completează cel puțin un răspuns.')
+      return
+    }
     setSubmitError('')
     setIsGenerating(true)
-    try {
-      const res = await fetch(`${apiUrl}${API_PREFIX}/evaluations/public/${linkId}/answer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question_id: questionId,
-          answer: answerText,
-          session_token: sessionToken,
-          guest_name: name,
-          guest_class: guestClass.trim(),
-          mode: feedbackMode,
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        const msg = err.detail ?? 'Eroare la trimitere'
-        if (res.status === 403 && String(msg).toLowerCase().includes('expirat')) {
-          setTimerExpired(true)
-          setTimeRemaining(0)
-        }
-        throw new Error(msg)
-      }
-      const data = await res.json()
-      setFeedbackResults((prev) => {
-        const next = { ...prev, [questionId]: { score: data.score, feedback: data.feedback || [] } }
-        try {
-          if (typeof sessionStorage !== 'undefined' && sessionToken) {
-            sessionStorage.setItem(feedbackStorageKey(linkId, sessionToken), JSON.stringify(next))
+    const errors = []
+    for (const q of questionsToSubmit) {
+      try {
+        const res = await fetch(`${apiUrl}${API_PREFIX}/evaluations/public/${linkId}/answer`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            question_id: q.id,
+            answer: answers[q.id],
+            session_token: sessionToken,
+            guest_name: name,
+            guest_class: guestClass.trim(),
+            mode: feedbackMode,
+          }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          const msg = err.detail ?? 'Eroare la trimitere'
+          if (res.status === 403 && String(msg).toLowerCase().includes('expirat')) {
+            setTimerExpired(true)
+            setTimeRemaining(0)
           }
-        } catch { /* ignore */ }
-        return next
-      })
-    } catch (e) {
-      setSubmitError(e.message || 'Eroare')
-    } finally {
-      setIsGenerating(false)
+          errors.push(`Întrebarea ${q.id}: ${msg}`)
+          continue
+        }
+        const data = await res.json()
+        setFeedbackResults((prev) => {
+          const next = { ...prev, [q.id]: { score: data.score, feedback: data.feedback || [] } }
+          try {
+            if (typeof sessionStorage !== 'undefined' && sessionToken) {
+              sessionStorage.setItem(feedbackStorageKey(linkId, sessionToken), JSON.stringify(next))
+            }
+          } catch { /* ignore */ }
+          return next
+        })
+      } catch (e) {
+        errors.push(`Întrebarea ${q.id}: ${e.message || 'Eroare'}`)
+      }
+    }
+    setSubmitted(true)
+    setIsGenerating(false)
+    if (errors.length > 0) {
+      setSubmitError(`Unele răspunsuri nu au putut fi trimise: ${errors.join('; ')}`)
     }
   }
 
@@ -401,6 +415,7 @@ export default function PublicExam({ linkId, apiUrl }) {
   const questions = sessionQuestions ?? []
   const canAnswer = guestName.trim().length > 0 && !timerExpired && timeRemaining > 0
   const timerBlock = timerExpired || timeRemaining <= 0
+  const inputsLocked = submitted || timerBlock
 
   return (
     <PageShell>
@@ -435,7 +450,7 @@ export default function PublicExam({ linkId, apiUrl }) {
       </Card>
 
       {/* Timer expired banner */}
-      {timerBlock && (evalData.lifecycle_status === 'active' || !evalData.lifecycle_status) && (
+      {timerBlock && !submitted && (evalData.lifecycle_status === 'active' || !evalData.lifecycle_status) && (
         <ErrorBanner>
           Timpul pentru completare în această sesiune a expirat. Nu mai poți trimite răspunsuri noi.
         </ErrorBanner>
@@ -453,7 +468,7 @@ export default function PublicExam({ linkId, apiUrl }) {
               onChange={(e) => setGuestName(e.target.value)}
               placeholder="Ex: Ion Popescu"
               className={inputCls}
-              disabled={timerBlock}
+              disabled={inputsLocked}
             />
           </div>
           <div>
@@ -464,7 +479,7 @@ export default function PublicExam({ linkId, apiUrl }) {
               onChange={(e) => setGuestClass(e.target.value)}
               placeholder="Ex: 10A"
               className={inputCls}
-              disabled={timerBlock}
+              disabled={inputsLocked}
             />
           </div>
         </div>
@@ -477,7 +492,7 @@ export default function PublicExam({ linkId, apiUrl }) {
           value={feedbackMode}
           onChange={(e) => setFeedbackMode(e.target.value)}
           className={inputCls}
-          disabled={!canAnswer || timerBlock}
+          disabled={inputsLocked}
         >
           <option value="ai">AI</option>
           <option value="rule_based">Reguli simple</option>
@@ -493,7 +508,7 @@ export default function PublicExam({ linkId, apiUrl }) {
       {/* Questions */}
       {questions.map((q, idx) => {
         const fb = feedbackResults[q.id]
-        const isDisabled = !canAnswer || isGenerating || fb || timerBlock
+        const isDisabled = inputsLocked || isGenerating
         return (
           <Card key={q.id}>
             <div className="mb-3 flex items-baseline justify-between">
@@ -585,12 +600,12 @@ export default function PublicExam({ linkId, apiUrl }) {
               />
             )}
 
-            {/* Feedback display */}
+            {/* Feedback display (shown after submit) */}
             {fb && (
               <div className="rounded-lg border border-primary/20 bg-primary/5 p-4">
                 {fb.score != null && (
                   <p className="mb-2 text-sm font-semibold">
-                    Scor: <span className="text-primary">{fb.score}</span>
+                    Scor: <span className="text-primary">{fb.score}</span> / {q.points}
                   </p>
                 )}
                 {fb.feedback?.map((item, i) => (
@@ -601,25 +616,40 @@ export default function PublicExam({ linkId, apiUrl }) {
                 ))}
               </div>
             )}
-
-            {/* Submit button */}
-            {!fb && (
-              <PrimaryBtn disabled={isDisabled} onClick={() => handleSubmitAnswer(q.id, answers[q.id])}>
-                {isGenerating ? (
-                  'Se procesează...'
-                ) : (
-                  <>
-                    <svg viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4">
-                      <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                    </svg>
-                    Trimite răspunsul
-                  </>
-                )}
-              </PrimaryBtn>
-            )}
           </Card>
         )
       })}
+
+      {/* Submit all button */}
+      {!submitted && !timerBlock && questions.length > 0 && (
+        <div className="flex justify-center">
+          <PrimaryBtn
+            disabled={!canAnswer || isGenerating}
+            onClick={handleSubmitAll}
+            className="px-8 py-3 text-base"
+          >
+            {isGenerating ? (
+              'Se trimite...'
+            ) : (
+              <>
+                <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5">
+                  <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                </svg>
+                Trimite tot
+              </>
+            )}
+          </PrimaryBtn>
+        </div>
+      )}
+
+      {/* Submitted confirmation */}
+      {submitted && (
+        <Card className="border-green-500/30 bg-green-500/5">
+          <p className="text-center text-sm font-semibold text-green-700 dark:text-green-400">
+            Răspunsurile au fost trimise cu succes! Poți vedea feedback-ul mai sus la fiecare întrebare.
+          </p>
+        </Card>
+      )}
     </PageShell>
   )
 }
