@@ -121,6 +121,7 @@ export function AppProvider({ children }) {
 
   const isAuthenticated = Boolean(token && user)
   const isProfessor = user?.role === 'professor'
+  const isAdmin = user?.role === 'admin'
 
   return (
     <AppContext.Provider
@@ -129,6 +130,7 @@ export function AppProvider({ children }) {
         user,
         isAuthenticated,
         isProfessor,
+        isAdmin,
         theme,
         toggleTheme,
         avatarUrl,

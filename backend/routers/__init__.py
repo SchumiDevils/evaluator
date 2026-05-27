@@ -1,3 +1,3 @@
-from . import auth, evaluations, feedback
+from . import admin, auth, evaluations, feedback
 
-__all__ = ["auth", "evaluations", "feedback"]
+__all__ = ["admin", "auth", "evaluations", "feedback"]

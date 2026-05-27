@@ -135,6 +135,22 @@ export const analytics = {
   global: () => apiFetch('/analytics/'),
 }
 
+export const admin = {
+  listUsers: () => apiFetchJson('/admin/users'),
+  updateUserRole: (userId, role) =>
+    apiFetchJson(`/admin/users/${userId}/role`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role }),
+    }),
+  deleteUser: (userId) =>
+    apiFetchJson(`/admin/users/${userId}`, { method: 'DELETE' }),
+  listEvaluations: () => apiFetchJson('/admin/evaluations'),
+  deleteEvaluation: (evalId) =>
+    apiFetchJson(`/admin/evaluations/${evalId}`, { method: 'DELETE' }),
+  stats: () => apiFetchJson('/admin/stats'),
+}
+
 export const chat = {
   sendMessage: (messages) =>
     apiFetchJson('/chat/message', {

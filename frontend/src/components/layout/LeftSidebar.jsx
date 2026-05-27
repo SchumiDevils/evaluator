@@ -12,6 +12,7 @@ import {
   Moon,
   LogOut,
   Bot,
+  Shield,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -23,7 +24,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 
 export default function LeftSidebar({ mobile = false, onNavigate }) {
-  const { user, isProfessor, theme, toggleTheme, logout, avatarUrl } = useApp()
+  const { user, isProfessor, isAdmin, theme, toggleTheme, logout, avatarUrl } = useApp()
   const location = useLocation()
   const navigate = useNavigate()
 
@@ -47,6 +48,9 @@ export default function LeftSidebar({ mobile = false, onNavigate }) {
     { path: '/analytics', label: 'Analize', icon: BarChart3 },
     ...(!isProfessor
       ? [{ path: '/my-responses', label: 'Răspunsurile mele', icon: FileText }]
+      : []),
+    ...(isAdmin
+      ? [{ path: '/admin', label: 'Admin', icon: Shield }]
       : []),
     { path: '/profile', label: 'Profil', icon: User },
   ]
@@ -178,7 +182,7 @@ export default function LeftSidebar({ mobile = false, onNavigate }) {
                 {user?.full_name || 'Utilizator'}
               </span>
               <span className="text-xs text-muted-foreground">
-                {isProfessor ? 'Profesor' : 'Student'}
+                {isAdmin ? 'Admin' : isProfessor ? 'Profesor' : 'Student'}
               </span>
             </div>
           </Button>
@@ -199,7 +203,7 @@ export default function LeftSidebar({ mobile = false, onNavigate }) {
                     {user?.full_name || 'Utilizator'}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {isProfessor ? 'Profesor' : 'Student'}
+                    {isAdmin ? 'Admin' : isProfessor ? 'Profesor' : 'Student'}
                   </span>
                 </div>
               </Button>

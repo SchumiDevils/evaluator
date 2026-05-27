@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     smtp_from: Optional[str] = None
     smtp_use_tls: bool = True
 
+    admin_email: Optional[str] = None
+
     model_config = SettingsConfigDict(env_file=(".env", "../.env"), env_file_encoding="utf-8", extra="ignore")
 
 

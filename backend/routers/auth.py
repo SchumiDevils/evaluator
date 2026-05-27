@@ -124,6 +124,10 @@ async def reset_password(body: ResetPasswordRequest, session: AsyncSession = Dep
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def register_user(user_in: UserCreate, session: AsyncSession = Depends(get_session)) -> UserRead:
+    role = user_in.role if isinstance(user_in.role, UserRole) else UserRole(user_in.role)
+    if role == UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Nu te poți înregistra ca admin.")
+
     existing = await _get_user_by_email(session, user_in.email)
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email deja folosit.")
@@ -131,7 +135,7 @@ async def register_user(user_in: UserCreate, session: AsyncSession = Depends(get
     user = User(
         email=user_in.email.lower(),
         full_name=user_in.full_name,
-        role=user_in.role if isinstance(user_in.role, UserRole) else UserRole(user_in.role),
+        role=role,
         hashed_password=get_password_hash(user_in.password),
     )
     session.add(user)
@@ -147,6 +151,10 @@ async def login(
     user = await _get_user_by_email(session, form_data.username)
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credențiale invalide.")
+
+    if settings.admin_email and user.email == settings.admin_email.lower() and user.role != UserRole.ADMIN:
+        user.role = UserRole.ADMIN
+        await session.commit()
 
     access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
     token = create_access_token(str(user.id), expires_delta=access_token_expires)

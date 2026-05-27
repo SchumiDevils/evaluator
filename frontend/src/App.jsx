@@ -11,6 +11,7 @@ import MyResponsesView from '@/components/responses/MyResponsesView'
 import ProfileView from '@/components/profile/ProfileView'
 import PublicExam from '@/components/PublicExam'
 import ChatbotView from '@/components/chat/ChatbotView'
+import AdminPanel from '@/components/admin/AdminPanel'
 
 function parsePublicLinkFromPath() {
   if (typeof window === 'undefined') return null
@@ -60,6 +61,7 @@ function AppRoutes() {
         <Route path="/my-responses" element={<MyResponsesView />} />
         <Route path="/profile" element={<ProfileView />} />
         <Route path="/chat" element={<ChatbotView />} />
+        <Route path="/admin" element={<AdminPanel />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
