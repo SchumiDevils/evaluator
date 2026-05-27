@@ -19,9 +19,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { ArrowLeft, Plus, Trash2, AlertTriangle, FileText, Pencil } from 'lucide-react'
+import { ArrowLeft, Plus, Trash2, AlertTriangle, FileText, Pencil, Upload, FileUp, Loader2, Check, X } from 'lucide-react'
 import { toast } from 'sonner'
 import VariantEditor from './VariantEditor'
+import PdfImportDialog from './PdfImportDialog'
 
 const newKey = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`
 
@@ -73,6 +74,7 @@ export default function AssessmentForm() {
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorLoading, setEditorLoading] = useState(false)
   const [editorVariant, setEditorVariant] = useState(null) // { _key, id?, name, questions, __localIndex? }
+  const [pdfDialogOpen, setPdfDialogOpen] = useState(false)
 
   useEffect(() => {
     if (!isEditing) return
@@ -244,6 +246,31 @@ export default function AssessmentForm() {
     }
   }
 
+  const handlePdfImport = (result) => {
+    if (result.title && !form.title) setForm((p) => ({ ...p, title: result.title }))
+    if (result.subject && !form.subject) setForm((p) => ({ ...p, subject: result.subject }))
+
+    const questions = (result.questions || []).map((q, idx) => ({
+      _key: newKey(),
+      question_type: q.question_type || 'long_answer',
+      text: q.text || '',
+      options: q.options || null,
+      correct_answer: q.correct_answer || '',
+      points: q.points || 10,
+      order: idx,
+    }))
+
+    const newV = {
+      _key: newKey(),
+      name: `Varianta ${variants.length + 1}`,
+      question_count: questions.length,
+      questions,
+    }
+    setVariants((p) => [...p, { ...newV, order: p.length }])
+    setPdfDialogOpen(false)
+    toast.success(`${questions.length} întrebări importate din PDF!`)
+  }
+
   const handleSave = async (e) => {
     e.preventDefault()
     if (!form.title.trim()) {
@@ -403,9 +430,16 @@ export default function AssessmentForm() {
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">Variante ({totalVariants})</CardTitle>
-                  <Button type="button" variant="outline" size="sm" onClick={addLocalVariant}>
-                    <Plus className="mr-1 h-3.5 w-3.5" /> Adaugă variantă
-                  </Button>
+                  <div className="flex gap-2">
+                    {!isEditing && (
+                      <Button type="button" variant="outline" size="sm" onClick={() => setPdfDialogOpen(true)}>
+                        <FileUp className="mr-1 h-3.5 w-3.5" /> Import PDF
+                      </Button>
+                    )}
+                    <Button type="button" variant="outline" size="sm" onClick={addLocalVariant}>
+                      <Plus className="mr-1 h-3.5 w-3.5" /> Adaugă variantă
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
@@ -524,6 +558,12 @@ export default function AssessmentForm() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <PdfImportDialog
+        open={pdfDialogOpen}
+        onOpenChange={setPdfDialogOpen}
+        onConfirm={handlePdfImport}
+      />
 
       <RightSidebar>
         <Card>

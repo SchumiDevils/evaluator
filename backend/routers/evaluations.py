@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import Response as HttpPdfResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
@@ -242,6 +242,62 @@ class MyResponseRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# --- PDF Import ---
+
+_MAX_PDF_SIZE = 10_000_000  # 10 MB
+
+
+@router.post("/import-pdf")
+async def import_pdf(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Extract questions from an uploaded PDF using AI."""
+    if current_user.role not in (UserRole.PROFESSOR, UserRole.ADMIN):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Doar profesorii pot importa PDF-uri.")
+
+    content_type = (file.content_type or "").split(";")[0].strip().lower()
+    if content_type != "application/pdf":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Fișierul trebuie să fie PDF.")
+
+    pdf_bytes = await file.read()
+    if len(pdf_bytes) > _MAX_PDF_SIZE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PDF-ul este prea mare (max 10 MB).")
+
+    from ..services.pdf_import import extract_text_from_pdf, parse_pdf_with_ai
+
+    try:
+        text = extract_text_from_pdf(pdf_bytes)
+    except ImportError:
+        logger.exception("PyMuPDF (fitz) is not installed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Librăria PyMuPDF nu este instalată pe server. Rulează: pip install PyMuPDF",
+        )
+    except Exception:
+        logger.exception("Failed to extract text from PDF")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Nu s-a putut citi PDF-ul.")
+
+    if not text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="PDF-ul nu conține text extragibil (poate fi un scan/imagine).",
+        )
+
+    try:
+        result = await parse_pdf_with_ai(text)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    except Exception:
+        logger.exception("PDF import AI error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Eroare la analiza AI a PDF-ului.",
+        )
+
+    return result
 
 
 # --- Helpers ---

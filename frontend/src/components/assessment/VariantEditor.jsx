@@ -292,7 +292,7 @@ export default function VariantEditor({ initialVariant, onSave, onCancel, saveLa
         ))}
       </div>
 
-      <div className="mt-3 flex justify-end gap-2 border-t bg-background pt-3">
+      <div className="mt-3 flex justify-end gap-2 border-t pt-3">
         {onCancel && (
           <Button type="button" variant="outline" onClick={onCancel}>
             Anulează

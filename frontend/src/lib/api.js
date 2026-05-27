@@ -120,6 +120,11 @@ export const evaluations = {
     }),
   deleteVariant: (evalId, variantId) =>
     apiFetch(`/evaluations/${evalId}/variants/${variantId}`, { method: 'DELETE' }),
+  importPdf: (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return apiFetchJson('/evaluations/import-pdf', { method: 'POST', body: fd })
+  },
 }
 
 export const feedback = {
