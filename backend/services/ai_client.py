@@ -20,6 +20,18 @@ class AIResult:
     score: Optional[int] = None
 
 
+def _strip_code_fences(text: str) -> str:
+    """Remove markdown code fences (```json ... ```) that LLMs sometimes wrap around JSON."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        first_newline = stripped.find("\n")
+        if first_newline != -1:
+            stripped = stripped[first_newline + 1:]
+        if stripped.endswith("```"):
+            stripped = stripped[:-3]
+    return stripped.strip()
+
+
 def _parse_text_to_feedback(text: str, source: str) -> list[FeedbackItemSchema]:
     items: list[FeedbackItemSchema] = []
 
@@ -133,7 +145,7 @@ async def _generate_with_openai_compatible(
     parsed_feedback: list[FeedbackItemSchema] = []
 
     try:
-        parsed = json.loads(text_output)
+        parsed = json.loads(_strip_code_fences(text_output))
         if isinstance(parsed, dict):
             raw_score = parsed.get("score")
             if isinstance(raw_score, (int, float)):
@@ -240,7 +252,7 @@ async def _generate_with_huggingface(
     parsed_score: Optional[int] = None
     parsed_feedback: list[FeedbackItemSchema] = []
     try:
-        parsed = json.loads(text)
+        parsed = json.loads(_strip_code_fences(text))
         if isinstance(parsed, dict):
             raw_score = parsed.get("score")
             if isinstance(raw_score, (int, float)):
