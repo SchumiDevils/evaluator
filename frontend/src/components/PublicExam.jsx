@@ -428,7 +428,7 @@ export default function PublicExam({ linkId, apiUrl }) {
             {evalData.description && <p className="text-sm text-muted-foreground">{evalData.description}</p>}
             {(evalData.start_at || evalData.end_at || evalData.scheduled_starts_at || evalData.scheduled_ends_at) && (
               <p className="text-xs text-muted-foreground">
-                Fereastră:{' '}
+                Disponibil:{' '}
                 {(evalData.start_at || evalData.scheduled_starts_at)
                   ? new Date(evalData.start_at || evalData.scheduled_starts_at).toLocaleString('ro-RO', { dateStyle: 'short', timeStyle: 'short' })
                   : '—'}
@@ -439,8 +439,7 @@ export default function PublicExam({ linkId, apiUrl }) {
               </p>
             )}
             <p className="text-xs text-muted-foreground">
-              După început: maxim {evalData.duration} minute pentru completare (și nu după end_at). Stare:{' '}
-              <strong>{evalData.lifecycle_status || 'active'}</strong>.
+              Ai la dispoziție {evalData.duration} minute pentru completare.
             </p>
           </div>
           <div className="flex-shrink-0">
