@@ -144,7 +144,7 @@ export default function AdminPanel() {
         </TabsList>
 
         <TabsContent value="users" className="mt-4">
-          <div className="rounded-xl border bg-card shadow-sm">
+          <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -212,7 +212,7 @@ export default function AdminPanel() {
         </TabsContent>
 
         <TabsContent value="evaluations" className="mt-4">
-          <div className="rounded-xl border bg-card shadow-sm">
+          <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
